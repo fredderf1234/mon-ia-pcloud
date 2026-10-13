@@ -11,7 +11,7 @@ PCLOUD_TOKEN = os.environ.get("PCLOUD_ACCESS_TOKEN")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 PCLOUD_FILE_NAME = "memoire_ia.json"
-TARGET_FOLDER_NAME = "hh"  # Nom de votre dossier dans pCloud
+TARGET_FOLDER_NAME = "hh"  # Votre dossier pCloud existant
 
 
 def get_folder_id_by_name(token, folder_name):
@@ -146,7 +146,7 @@ def index():
 
       try:
         response = client.models.generate_content(
-            model="gemini-1.5-flash", contents=full_prompt
+            model="gemini-3.8-flash", contents=full_prompt
         )
         answer = response.text
       except Exception as e:
