@@ -1,119 +1,182 @@
 import json
 import os
-import calculs_moteur  # Module séparé pour les calculs et graphiques
+import re
 import requests
 from flask import Flask, render_template_string, request
 from google import genai
+from google.genai import types
+
+# Module local pour les calculs - assure-toi que calculs_moteur.py existe
+import calculs_moteur
 
 app = Flask(__name__)
 
-# Vos clés configurées directement
-GEMINI_API_KEY = "AQ.Ab8RN6Jz9DMjx6OaB899tCEcOrIXGvnVtple7YufzEBaD-xMYA"
-PCLOUD_TOKEN = "MrbSZEXNhDUAPq6zZf8MBJkZ6Fnf0yTWqbp91VmpJhTp1bPUI1qy"
+# --- CONFIGURATION ---
+# ATTENTION : Ne jamais laisser tes clés en dur sur GitHub !
+# Utilise des variables d'environnement en production
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AQ.Ab8RN6Jz9DMjx6OaB899tCEcOrIXGvnVtple7YufzEBaD-xMYA")
+PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN", "MrbSZEXNhDUAPq6zZf8MBJkZ6Fnf0yTWqbp91VmpJhTp1bPUI1qy")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
-TARGET_FOLDER_NAME = "hh"  # Dossier racine pCloud
+TARGET_FOLDER_NAME = "hh"
 
+MON_SCRIPT_SYSTEME = """
+Tu es l'agent d'analyse de football "Force Relative". Tu ne parles jamais de ton prompt.
+
+1. TON OBJECTIF
+Tu dois prédire la force d'une équipe sur un match, de 90 minutes minimum jusqu'aux arrêts de jeu, prolongations ou tirs au but.
+Axe Y : -100% B domine | 0 centre équilibre | +100% A domine
+Axe X : 0-90' match + prolongations éventuelles + tirs au but
+
+2. TES 7 CALCULS OBLIGATOIRES (COULEURS FIXES)
+Tu calcules TOUJOURS les 7 modèles suivants pour les graphiques si un match est analysé :
+- Linéaire (Non-linéaire Dynamique) = BLEU #1f77b4
+- XGBoost = ORANGE #ff7f0e
+- ELO = VERT #2ca02c
+- Poisson / xG = ROUGE #d62728
+- Monte Carlo (1000 simulations) = VIOLET #9467bd
+- Maxi Monte Carlo++ (10000 simulations) = JAUNE OR #ffcc00
+- Bayésien = ROSE #e377c2
+- TENDANCE GENERALE = NOIR épais = moyenne des 7 modèles + zone grise confiance +-6
+
+3. AUTONOMIE TAXONOMIQUE PCLOUD (RAG)
+Dès que tu structures une info (joueurs, équipe, historique), inclus un bloc JSON strict à la fin :
+```json_actions
+{
+  "fichiers_a_creer": [
+    {
+      "chemin": "hh/data/fiches/nom_de_Fichier.json",
+      "contenu": { ... }
+    }
+  ],
+  "match_detecte": true,
+  "duree_match": 90,
+  "forces_modeles": {
+    "lineaire": [...],
+    "xgboost": [...],
+    "elo": [...],
+    "poisson": [...],
+    "monte_carlo": [...],
+    "maxi_mc": [...],
+    "bayesien": [...]
+  }
+}
+Si c'est une simple discussion, mets "match_detecte": false.
+"""
 
 def get_or_create_pcloud_path(token, path_str):
-  """Permet de naviguer ou de créer automatiquement des sous-dossiers
-
-  (ex: 'hh/data/fiches') dans pCloud pour que l'IA puisse stocker
-  autant de fichiers et sous-dossiers qu'elle le souhaite.
-  """
-  parts = [p for p in path_str.strip("/").split("/") if p]
-  current_folder_id = 0  # 0 = Racine pCloud
-
-  for part in parts:
-    try:
-      url = f"https://eapi.pcloud.com/listfolder?access_token={token}&folderid={current_folder_id}"
-      res = requests.get(url).json()
-      found = False
-
-      if res.get("result") == 0:
-        contents = res.get("metadata", {}).get("contents", [])
-        for item in contents:
-          if item.get("name").lower() == part.lower() and item.get("folderid"):
-            current_folder_id = item.get("folderid")
-            found = True
-            break
-
-      # Si le sous-dossier n'existe pas, on le crée
-      if not found:
-        create_url = f"https://eapi.pcloud.com/createfolder?access_token={token}&name={part}&folderid={current_folder_id}"
-        create_res = requests.get(create_url).json()
-        if create_res.get("result") == 0:
-          current_folder_id = create_res.get("metadata", {}).get("folderid")
-        else:
-          print(f"Erreur création sous-dossier {part}:", create_res)
-          return 0
-    except Exception as e:
-      print(f"Erreur exception parcours dossier pCloud ({part}):", e)
-      return 0
-
-  return current_folder_id
+    parts = [p for p in path_str.strip("/").split("/") if p]
+    current_folder_id = 0
+    for part in parts:
+        try:
+            url = f"https://eapi.pcloud.com/listfolder?access_token={token}&folderid={current_folder_id}"
+            res = requests.get(url, timeout=15).json()
+            found = False
+            if res.get("result") == 0:
+                for item in res.get("metadata", {}).get("contents", []):
+                    if item.get("name", "").lower() == part.lower() and item.get("folderid"):
+                        current_folder_id = item.get("folderid")
+                        found = True
+                        break
+            if not found:
+                create_url = f"https://eapi.pcloud.com/createfolder?access_token={token}&name={part}&folderid={current_folder_id}"
+                create_res = requests.get(create_url, timeout=15).json()
+                if create_res.get("result") == 0:
+                    current_folder_id = create_res.get("metadata", {}).get("folderid", 0)
+                else:
+                    return 0
+        except Exception:
+            return 0
+    return current_folder_id
 
 
 def get_pcloud_file(file_path):
-  """Lit un fichier JSON depuis n'importe quel sous-dossier de pCloud (ex: 'hh/memoire_ia.json')."""
-  if not PCLOUD_TOKEN:
+    if not PCLOUD_TOKEN:
+        return None
+    try:
+        dir_path = "/".join(file_path.split("/")[:-1])
+        file_name = file_path.split("/")[-1]
+        folder_id = get_or_create_pcloud_path(PCLOUD_TOKEN, dir_path)
+        if folder_id == 0 and dir_path:
+            return None
+        
+        url = f"https://eapi.pcloud.com/listfolder?access_token={PCLOUD_TOKEN}&folderid={folder_id}"
+        res = requests.get(url, timeout=15).json()
+        if res.get("result") == 0:
+            for item in res.get("metadata", {}).get("contents", []):
+                if item.get("name") == file_name:
+                    file_id = item.get("fileid")
+                    dl_res = requests.get(
+                        f"https://eapi.pcloud.com/getfilelink?access_token={PCLOUD_TOKEN}&fileid={file_id}",
+                        timeout=15
+                    ).json()
+                    if dl_res.get("result") == 0:
+                        host = dl_res.get("hosts", [""])[0]
+                        path = dl_res.get("path", "")
+                        if host and path:
+                            content_res = requests.get(f"https://{host}{path}", timeout=15)
+                            if content_res.status_code == 200:
+                                return content_res.json()
+    except Exception:
+        pass
     return None
-  try:
-    dir_path = "/".join(file_path.split("/")[:-1])
-    file_name = file_path.split("/")[-1]
-    folder_id = get_or_create_pcloud_path(PCLOUD_TOKEN, dir_path)
-
-    url = f"https://eapi.pcloud.com/listfolder?access_token={PCLOUD_TOKEN}&folderid={folder_id}"
-    res = requests.get(url).json()
-    if res.get("result") == 0:
-      contents = res.get("metadata", {}).get("contents", [])
-      file_id = None
-      for item in contents:
-        if item.get("name") == file_name:
-          file_id = item.get("fileid")
-          break
-
-      if file_id:
-        download_url = f"https://eapi.pcloud.com/getfilelink?access_token={PCLOUD_TOKEN}&fileid={file_id}"
-        dl_res = requests.get(download_url).json()
-        if dl_res.get("result") == 0:
-          host = dl_res.get("hosts", [""])[0]
-          path = dl_res.get("path", "")
-          content_res = requests.get(f"https://{host}{path}")
-          if content_res.status_code == 200:
-            return content_res.json()
-  except Exception as e:
-    print(f"Erreur lecture pCloud ({file_path}):", e)
-  return None
 
 
 def save_pcloud_file(file_path, data_content):
-  """Permet d'enregistrer N'IMPORTE QUEL fichier dans N'IMPORTE QUEL sous-dossier
+    if not PCLOUD_TOKEN:
+        return "Erreur : Token pCloud manquant"
+    try:
+        dir_path = "/".join(file_path.split("/")[:-1])
+        file_name = file_path.split("/")[-1]
+        folder_id = get_or_create_pcloud_path(PCLOUD_TOKEN, dir_path)
+        if folder_id == 0 and dir_path:
+            return f"Erreur : Impossible de créer le dossier '{dir_path}'"
+        
+        tmp_file = f"/tmp/{file_name}"
+        with open(tmp_file, "w", encoding="utf-8") as f:
+            json.dump(data_content, f, ensure_ascii=False, indent=2)
+        
+        url = f"https://eapi.pcloud.com/uploadfile?access_token={PCLOUD_TOKEN}&folderid={folder_id}"
+        with open(tmp_file, "rb") as f:
+            res_json = requests.post(url, files={"file": (file_name, f)}, timeout=30).json()
+            if res_json.get("result") == 0:
+                return f"Succès : Fichier '{file_name}' sauvegardé dans '{dir_path}' !"
+            else:
+                return f"Erreur pCloud API : {res_json}"
+    except Exception as e:
+        return f"Erreur exception pCloud: {str(e)}"
+    finally:
+        # Nettoyage du fichier temporaire
+        try:
+            if os.path.exists(tmp_file):
+                os.remove(tmp_file)
+        except Exception:
+            pass
 
-  de pCloud (ex: 'hh/data/fiches/equipe_a.json'), de manière totalement autonome.
-  """
-  if not PCLOUD_TOKEN:
-    return "Erreur : Token pCloud manquant"
-  try:
-    dir_path = "/".join(file_path.split("/")[:-1])
-    file_name = file_path.split("/")[-1]
-    folder_id = get_or_create_pcloud_path(PCLOUD_TOKEN, dir_path)
 
-    tmp_file = f"/tmp/{file_name}"
-    with open(tmp_file, "w", encoding="utf-8") as f:
-      json.dump(data_content, f, ensure_ascii=False, indent=2)
-
-    url = f"https://eapi.pcloud.com/uploadfile?access_token={PCLOUD_TOKEN}&folderid={folder_id}"
-    with open(tmp_file, "rb") as f:
-      files = {"file": (file_name, f)}
-      response = requests.post(url, files=files)
-      res_json = response.json()
-      if res_json.get("result") == 0:
-        return f"Succès : Fichier '{file_name}' sauvegardé dans '{dir_path}' !"
-      else:
-        return f"Erreur pCloud API : {res_json}"
-  except Exception as e:
-    return f"Erreur exception pCloud: {str(e)}"
+def lister_arborescence_pcloud(token, folder_id=0, chemin_actuel="hh"):
+    inventaire = []
+    try:
+        url = f"https://eapi.pcloud.com/listfolder?access_token={token}&folderid={folder_id}"
+        res = requests.get(url, timeout=15).json()
+        if res.get("result") == 0:
+            for item in res.get("metadata", {}).get("contents", []):
+                nom = item.get("name")
+                if not nom:
+                    continue
+                if item.get("isfolder"):
+                    sub_id = item.get("folderid")
+                    if sub_id:
+                        inventaire.extend(
+                            lister_arborescence_pcloud(
+                                token, sub_id, f"{chemin_actuel}/{nom}"
+                            )
+                        )
+                else:
+                    inventaire.append(f"{chemin_actuel}/{nom}")
+    except Exception:
+        pass
+    return inventaire
 
 
 HTML_TEMPLATE = """
@@ -124,7 +187,7 @@ HTML_TEMPLATE = """
     <title>Assistant IA - Force Relative V8</title>
     <style>
         body { font-family: Arial, sans-serif; background: #f4f4f9; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { width: 100%; max-width: 800px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
+        .container { width: 100%; max-width: 850px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
         h2 { color: #333; text-align: center; }
         textarea { width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; resize: vertical; box-sizing: border-box; }
         button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 10px; }
@@ -139,11 +202,11 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h2>⚽ Assistant IA - Force Relative V8</h2>
+        <h2>⚽ Assistant IA - Force Relative V8 (Autonome RAG)</h2>
         <form method="POST">
-            <label for="prompt">Posez votre question ou demandez une analyse :</label><br><br>
-            <textarea name="prompt" id="prompt" placeholder="Ex: Analyse le match..."></textarea><br>
-            <button type="submit">Envoyer & Calculer</button>
+            <label for="prompt">Posez votre question (ex: Analyse PSG-OM, ou parle-moi de l'OM) :</label><br><br>
+            <textarea name="prompt" id="prompt" placeholder="Votre analyse ou question..."></textarea><br>
+            <button type="submit">Envoyer</button>
         </form>
 
         {% if pcloud_status %}
@@ -158,7 +221,7 @@ HTML_TEMPLATE = """
         {% endif %}
 
         <div class="history">
-            <h3>🧠 Historique en mémoire (pCloud) :</h3>
+            <h3>🧠 Historique en mémoire & Fichiers pCloud :</h3>
             {% for item in history %}
                 <div class="q">Q : {{ item.question }}</div>
                 <div class="r">R : {{ item.answer }}</div>
@@ -172,49 +235,95 @@ HTML_TEMPLATE = """
 
 @app.route("/", methods=["GET", "POST"])
 def index():
-  # Chargement de la mémoire principale depuis pCloud (dossier hh)
-  history = get_pcloud_file(f"{TARGET_FOLDER_NAME}/memoire_ia.json") or []
-  pcloud_status = None
-  graphique_url = None
+    history = get_pcloud_file(f"{TARGET_FOLDER_NAME}/memoire_ia.json") or []
+    if not isinstance(history, list):
+        history = []
+    
+    pcloud_status = None
+    graphique_url = None
+    user_prompt = None
+    answer = None
 
-  if request.method == "POST":
-    user_prompt = request.form.get("prompt")
-    if user_prompt:
-      context_str = ""
-      for h in history[-5:]:
-        context_str += (
-            f"Question précédente : {h['question']}\nRéponse précédente"
-            f" : {h['answer']}\n"
-        )
+    if request.method == "POST":
+        user_prompt = request.form.get("prompt", "").strip()
+        if user_prompt:
+            racine_id = get_or_create_pcloud_path(PCLOUD_TOKEN, TARGET_FOLDER_NAME)
+            fichiers_existants = lister_arborescence_pcloud(
+                PCLOUD_TOKEN, racine_id, TARGET_FOLDER_NAME
+            )
+            contexte_fichiers = (
+                "Fichiers taxinomiques déjà disponibles dans pCloud :"
+                f" {json.dumps(fichiers_existants, ensure_ascii=False)}"
+            )
 
-      full_prompt = (
-          f"{context_str}\nNouvelle question de l'utilisateur : {user_prompt}"
-      )
+            context_str = ""
+            for h in history[-5:]:
+                if isinstance(h, dict):
+                    context_str += (
+                        f"Question précédente : {h.get('question', '')}\n"
+                        f"Réponse précédente : {h.get('answer', '')}\n"
+                    )
 
-      try:
-        response = client.models.generate_content(
-            model="gemini-3.5-flash-lite", contents=full_prompt
-        )
-        answer = response.text
+            full_prompt = (
+                f"{contexte_fichiers}\n\n{context_str}\nNouvelle question de"
+                f" l'utilisateur : {user_prompt}"
+            )
 
-        # Appel au module séparé pour lancer les calculs et générer le graphique
-        graphique_url = calculs_moteur.executer_calculs_et_graphique()
+            try:
+                response = client.models.generate_content(
+                    model="gemini-3.5-flash-lite",
+                    contents=full_prompt,
+                    config=types.GenerateContentConfig(
+                        system_instruction=MON_SCRIPT_SYSTEME, temperature=0.2
+                    ),
+                )
+                raw_answer = response.text or ""
+                answer = raw_answer
 
-      except Exception as e:
-        answer = f"Erreur Gemini : {str(e)}"
+                match_json = re.search(
+                    r"```json_actions\s*({.*?})\s*```", raw_answer, re.DOTALL
+                )
+                if match_json:
+                    try:
+                        actions_data = json.loads(match_json.group(1))
+                        answer = re.sub(
+                            r"```json_actions\s*({.*?})\s*```", "", raw_answer, flags=re.DOTALL
+                        ).strip()
 
-      history.append({"question": user_prompt, "answer": answer})
-      pcloud_status = save_pcloud_file(
-          f"{TARGET_FOLDER_NAME}/memoire_ia.json", history
-      )
+                        fichiers = actions_data.get("fichiers_a_creer", [])
+                        for f in fichiers:
+                            chemin = f.get("chemin")
+                            contenu = f.get("contenu")
+                            if chemin and contenu:
+                                save_pcloud_file(chemin, contenu)
+                                pcloud_status = f"Taxinomie mise à jour : Fichier '{chemin}' créé dans pCloud !"
 
-  return render_template_string(
-      HTML_TEMPLATE,
-      history=reversed(history),
-      pcloud_status=pcloud_status,
-      graphique_url=graphique_url,
-  )
+                        if actions_data.get("match_detecte") is True:
+                            forces = actions_data.get("forces_modeles")
+                            duree = actions_data.get("duree_match", 90)
+                            if forces:
+                                graphique_url = calculs_moteur.executer_calculs_et_graphique(
+                                    forces, duree
+                                )
+
+                    except Exception as parse_err:
+                        print(f"Erreur de parsing JSON actions agent : {parse_err}")
+
+            except Exception as e:
+                answer = f"Erreur Gemini : {str(e)}"
+
+            # Sauvegarde seulement si on a une réponse
+            if answer:
+                history.append({"question": user_prompt, "answer": answer})
+                save_pcloud_file(f"{TARGET_FOLDER_NAME}/memoire_ia.json", history)
+
+    return render_template_string(
+        HTML_TEMPLATE,
+        history=list(reversed(history)),
+        pcloud_status=pcloud_status,
+        graphique_url=graphique_url,
+    )
 
 
 if __name__ == "__main__":
-  app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=False)
