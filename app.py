@@ -6,18 +6,22 @@ from google import genai
 
 app = Flask(__name__)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-PCLOUD_TOKEN = os.environ.get("PCLOUD_ACCESS_TOKEN")
+# Vos clés configurées directement
+GEMINI_API_KEY = "AQ.Ab8RN6J6ouWeVgrruti_v5E1cWHrO14EnGc-j77euRCZiF6clA"
+# Utilisez votre access token pCloud (généré depuis votre application pCloud)
+PCLOUD_TOKEN = os.environ.get(
+    "PCLOUD_ACCESS_TOKEN", "2V2KSXZMrbSZquab09Inv2pQBRE7NdkBI8xAR370"
+)
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 PCLOUD_FILE_NAME = "memoire_ia.json"
-TARGET_FOLDER_NAME = "hh"  # Votre dossier pCloud existant
+TARGET_FOLDER_NAME = "hh"  # Votre dossier pCloud cible
 
 
 def get_folder_id_by_name(token, folder_name):
   """Cherche ou crée automatiquement le dossier 'hh' dans pCloud."""
   try:
-    url = f"https://eapi.pcloud.com/listfolder?auth={token}&folderid=0"
+    url = f"https://eapi.pcloud.com/listfolder?access_token={token}&folderid=0"
     res = requests.get(url).json()
     if res.get("result") == 0:
       contents = res.get("metadata", {}).get("contents", [])
@@ -29,7 +33,7 @@ def get_folder_id_by_name(token, folder_name):
           return item.get("folderid")
 
       # Si le dossier n'existe pas, on le crée
-      create_url = f"https://eapi.pcloud.com/createfolder?auth={token}&name={folder_name}&folderid=0"
+      create_url = f"https://eapi.pcloud.com/createfolder?access_token={token}&name={folder_name}&folderid=0"
       create_res = requests.get(create_url).json()
       if create_res.get("result") == 0:
         return create_res.get("metadata", {}).get("folderid")
@@ -43,7 +47,7 @@ def get_pcloud_memory():
     return []
   try:
     folder_id = get_folder_id_by_name(PCLOUD_TOKEN, TARGET_FOLDER_NAME)
-    url = f"https://eapi.pcloud.com/listfolder?auth={PCLOUD_TOKEN}&folderid={folder_id}"
+    url = f"https://eapi.pcloud.com/listfolder?access_token={PCLOUD_TOKEN}&folderid={folder_id}"
     res = requests.get(url).json()
     if res.get("result") == 0:
       contents = res.get("metadata", {}).get("contents", [])
@@ -54,9 +58,7 @@ def get_pcloud_memory():
           break
 
       if file_id:
-        download_url = (
-            f"https://eapi.pcloud.com/getfilelink?auth={PCLOUD_TOKEN}&fileid={file_id}"
-        )
+        download_url = f"https://eapi.pcloud.com/getfilelink?access_token={PCLOUD_TOKEN}&fileid={file_id}"
         dl_res = requests.get(download_url).json()
         if dl_res.get("result") == 0:
           host = dl_res.get("hosts", [""])[0]
@@ -79,7 +81,7 @@ def save_pcloud_memory(history):
     with open(tmp_file, "w", encoding="utf-8") as f:
       json.dump(history, f, ensure_ascii=False, indent=2)
 
-    url = f"https://eapi.pcloud.com/uploadfile?auth={PCLOUD_TOKEN}&folderid={folder_id}"
+    url = f"https://eapi.pcloud.com/uploadfile?access_token={PCLOUD_TOKEN}&folderid={folder_id}"
     with open(tmp_file, "rb") as f:
       files = {"file": (PCLOUD_FILE_NAME, f)}
       response = requests.post(url, files=files)
