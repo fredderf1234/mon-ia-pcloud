@@ -7,30 +7,49 @@ import matplotlib.pyplot as plt
 import numpy as np
 
 
-def executer_calculs_et_graphique():
-  """Calcule et trace les 7 modèles de la Force Relative V8
+def executer_calculs_et_graphique(forces_dict=None, duree_match=90):
+  """Trace les courbes des 7 modèles sur une durée variable et dynamique
 
-  avec leurs codes couleurs stricts et génère le PNG final.
+  (minimum 90 min, s'adapte aux arrêts de jeu, prolongations, tirs au but).
   """
-  # Axe X : de 0 à 120 minutes + prolongations/tirs au but (123 min)
-  minutes = np.arange(0, 124)
+  # S'assure que la durée est au moins de 90 min, mais peut s'étendre si nécessaire
+  if not duree_match or duree_match < 90:
+    duree_match = 90
 
-  # Simulation ou calcul des 7 modèles de la V8 (seront connectés aux données de l'IA par la suite)
-  lineaire = np.sin(minutes / 10) * 20  # Linéaire (Non-linéaire Dynamique)
-  xgboost = np.cos(minutes / 12) * 25  # XGBoost
-  elo = np.linspace(-10, 30, len(minutes))  # ELO
-  poisson_xg = np.random.normal(0, 15, len(minutes))  # Poisson / xG
-  monte_carlo = np.cumsum(
-      np.random.normal(0, 2, len(minutes))
-  )  # Monte Carlo (1000 sim)
-  maxi_mc = np.cumsum(
-      np.random.normal(0, 5, len(minutes))
-  )  # Maxi Monte Carlo++ (10000 sim, plus volatile)
-  bayesien = (
-      np.linspace(0, 10, len(minutes)) + np.sin(minutes / 8) * 10
-  )  # Bayésien
+  minutes = np.arange(0, duree_match + 1)
+  n = len(minutes)
 
-  # Tendance Générale : Moyenne exacte des 7 modèles
+  # Récupération ou simulation des 7 modèles sur la longueur exacte du match
+  if forces_dict and isinstance(forces_dict, dict):
+    lineaire = np.array(
+        forces_dict.get("lineaire", np.sin(np.linspace(0, 10, n)) * 20)
+    )
+    xgboost = np.array(
+        forces_dict.get("xgboost", np.cos(np.linspace(0, 10, n)) * 25)
+    )
+    elo = np.array(forces_dict.get("elo", np.linspace(-10, 20, n)))
+    poisson_xg = np.array(
+        forces_dict.get("poisson", np.random.normal(0, 10, n))
+    )
+    monte_carlo = np.array(
+        forces_dict.get("monte_carlo", np.cumsum(np.random.normal(0, 2, n)))
+    )
+    maxi_mc = np.array(
+        forces_dict.get("maxi_mc", np.cumsum(np.random.normal(0, 4, n)))
+    )
+    bayesien = np.array(
+        forces_dict.get("bayesien", np.sin(np.linspace(0, 8, n)) * 15)
+    )
+  else:
+    # Valeurs par défaut adaptées à la durée dynamique
+    lineaire = np.sin(np.linspace(0, 15, n)) * 20
+    xgboost = np.cos(np.linspace(0, 15, n)) * 25
+    elo = np.linspace(-10, 20, n)
+    poisson_xg = np.random.normal(0, 10, n)
+    monte_carlo = np.cumsum(np.random.normal(0, 2, n))
+    maxi_mc = np.cumsum(np.random.normal(0, 4, n))
+    bayesien = np.sin(np.linspace(0, 12, n)) * 15
+
   tendance_generale = (
       lineaire
       + xgboost
@@ -41,10 +60,9 @@ def executer_calculs_et_graphique():
       + bayesien
   ) / 7
 
-  # Création de la figure Matplotlib
   plt.figure(figsize=(11, 6))
 
-  # Traçage des 7 modèles avec les couleurs et styles stricts V8
+  # Traçage des 7 modèles avec la charte graphique V8
   plt.plot(
       minutes,
       lineaire,
@@ -68,7 +86,7 @@ def executer_calculs_et_graphique():
   )
   plt.plot(minutes, bayesien, color="#e377c2", linewidth=1, label="Bayésien")
 
-  # Tendance Générale (Noir épais) + Zone de confiance grise (+-6)
+  # Tendance Générale (Noir épais) + Zone de confiance
   plt.plot(
       minutes,
       tendance_generale,
@@ -85,16 +103,17 @@ def executer_calculs_et_graphique():
       label="Confiance ±6",
   )
 
-  # Mise en forme du graphique (Axe Y : -100% à +100%, Ligne 0 centrale)
   plt.axhline(0, color="gray", linestyle=":", alpha=0.7)
-  plt.title("Analyse Force Relative - Modèles & Simulations V8", fontsize=12)
-  plt.xlabel("Minutes (0-120' + Tirs au but)")
+  plt.title(
+      f"Analyse Force Relative - Modèles & Simulations ({duree_match} min)",
+      fontsize=12,
+  )
+  plt.xlabel("Minutes")
   plt.ylabel("Domination (-100% / +100%)")
   plt.ylim(-100, 100)
   plt.legend(loc="upper left", bbox_to_anchor=(1, 1), fontsize="small")
   plt.tight_layout()
 
-  # Sauvegarde automatique dans le dossier static pour affichage immédiat sur la page web
   os.makedirs("static", exist_ok=True)
   chemin_image = "static/graphique_match.png"
   plt.savefig(chemin_image, dpi=150)
