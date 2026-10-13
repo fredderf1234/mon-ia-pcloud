@@ -1,6 +1,6 @@
 import json
 import os
-import calculs_moteur  # Appel au futur module de calculs séparé
+import calculs_moteur  # Module séparé pour les calculs et graphiques
 import requests
 from flask import Flask, render_template_string, request
 from google import genai
@@ -33,9 +33,7 @@ def get_or_create_pcloud_path(token, path_str):
       if res.get("result") == 0:
         contents = res.get("metadata", {}).get("contents", [])
         for item in contents:
-          if item.get("name").lower() == part.lower() and item.get(
-              "folderid"
-          ):
+          if item.get("name").lower() == part.lower() and item.get("folderid"):
             current_folder_id = item.get("folderid")
             found = True
             break
@@ -118,13 +116,12 @@ def save_pcloud_file(file_path, data_content):
     return f"Erreur exception pCloud: {str(e)}"
 
 
-# Template HTML d'origine avec affichage du graphique si disponible
 HTML_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
-    <title>Assistant IA avec Mémoire pCloud</title>
+    <title>Assistant IA - Force Relative V8</title>
     <style>
         body { font-family: Arial, sans-serif; background: #f4f4f9; margin: 0; padding: 20px; display: flex; justify-content: center; }
         .container { width: 100%; max-width: 800px; background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
@@ -142,11 +139,11 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h2>🤖 Assistant IA avec Mémoire pCloud</h2>
+        <h2>⚽ Assistant IA - Force Relative V8</h2>
         <form method="POST">
-            <label for="prompt">Posez votre question à Gemini :</label><br><br>
-            <textarea name="prompt" id="prompt" placeholder="Ex: Que penses-tu de mon projet..."></textarea><br>
-            <button type="submit">Envoyer</button>
+            <label for="prompt">Posez votre question ou demandez une analyse :</label><br><br>
+            <textarea name="prompt" id="prompt" placeholder="Ex: Analyse le match..."></textarea><br>
+            <button type="submit">Envoyer & Calculer</button>
         </form>
 
         {% if pcloud_status %}
@@ -155,7 +152,7 @@ HTML_TEMPLATE = """
 
         {% if graphique_url %}
             <div class="graph">
-                <h3>📊 Graphique généré :</h3>
+                <h3>📊 Graphique des Modèles & Simulations :</h3>
                 <img src="{{ graphique_url }}?t={{ range(1000) | random }}" alt="Graphique Match">
             </div>
         {% endif %}
