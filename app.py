@@ -15,14 +15,17 @@ TARGET_FOLDER_NAME = "hh"  # Votre dossier pCloud existant
 
 
 def get_folder_id_by_name(token, folder_name):
-  """Cherche automatiquement l'ID du dossier 'hh' dans pCloud."""
+  """Cherche ou crée automatiquement le dossier 'hh' dans pCloud."""
   try:
     url = f"https://eapi.pcloud.com/listfolder?auth={token}&folderid=0"
     res = requests.get(url).json()
     if res.get("result") == 0:
       contents = res.get("metadata", {}).get("contents", [])
       for item in contents:
-        if item.get("name") == folder_name and item.get("isfolder"):
+        if (
+            item.get("name").lower() == folder_name.lower()
+            and item.get("folderid")
+        ):
           return item.get("folderid")
 
       # Si le dossier n'existe pas, on le crée
@@ -69,8 +72,7 @@ def get_pcloud_memory():
 
 def save_pcloud_memory(history):
   if not PCLOUD_TOKEN:
-    print("Token pCloud manquant")
-    return
+    return "Erreur : Token pCloud manquant"
   try:
     folder_id = get_folder_id_by_name(PCLOUD_TOKEN, TARGET_FOLDER_NAME)
     tmp_file = "/tmp/memoire_ia.json"
@@ -81,9 +83,13 @@ def save_pcloud_memory(history):
     with open(tmp_file, "rb") as f:
       files = {"file": (PCLOUD_FILE_NAME, f)}
       response = requests.post(url, files=files)
-      print("Réponse pCloud upload:", response.text)
+      res_json = response.json()
+      if res_json.get("result") == 0:
+        return f"Succès : Fichier sauvegardé dans le dossier '{TARGET_FOLDER_NAME}' sur pCloud !"
+      else:
+        return f"Erreur pCloud API : {res_json}"
   except Exception as e:
-    print("Erreur écriture pCloud:", e)
+    return f"Erreur exception pCloud: {str(e)}"
 
 
 HTML_TEMPLATE = """
@@ -99,6 +105,7 @@ HTML_TEMPLATE = """
         textarea { width: 100%; height: 80px; padding: 10px; border: 1px solid #ccc; border-radius: 4px; resize: vertical; box-sizing: border-box; }
         button { background: #007bff; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; font-size: 16px; margin-top: 10px; }
         button:hover { background: #0056b3; }
+        .status { margin-top: 15px; padding: 10px; background: #e2f0d9; color: #385723; border-radius: 4px; border: 1px solid #c5e0b4; font-weight: bold; }
         .history { margin-top: 20px; background: #f8f9fa; padding: 15px; border-radius: 4px; border: 1px solid #e9ecef; max-height: 400px; overflow-y: auto; }
         .q { color: #0056b3; font-weight: bold; margin-bottom: 5px; }
         .r { color: #28a745; margin-bottom: 15px; white-space: pre-wrap; }
@@ -112,6 +119,10 @@ HTML_TEMPLATE = """
             <textarea name="prompt" id="prompt" placeholder="Ex: Que penses-tu de mon projet..."></textarea><br>
             <button type="submit">Envoyer</button>
         </form>
+
+        {% if pcloud_status %}
+            <div class="status">📌 {{ pcloud_status }}</div>
+        {% endif %}
 
         <div class="history">
             <h3>🧠 Historique en mémoire (pCloud) :</h3>
@@ -129,6 +140,7 @@ HTML_TEMPLATE = """
 @app.route("/", methods=["GET", "POST"])
 def index():
   history = get_pcloud_memory()
+  pcloud_status = None
 
   if request.method == "POST":
     user_prompt = request.form.get("prompt")
@@ -153,9 +165,11 @@ def index():
         answer = f"Erreur Gemini : {str(e)}"
 
       history.append({"question": user_prompt, "answer": answer})
-      save_pcloud_memory(history)
+      pcloud_status = save_pcloud_memory(history)
 
-  return render_template_string(HTML_TEMPLATE, history=reversed(history))
+  return render_template_string(
+      HTML_TEMPLATE, history=reversed(history), pcloud_status=pcloud_status
+  )
 
 
 if __name__ == "__main__":
