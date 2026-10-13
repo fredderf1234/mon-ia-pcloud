@@ -10,15 +10,37 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 PCLOUD_TOKEN = os.environ.get("PCLOUD_ACCESS_TOKEN")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
-
 PCLOUD_FILE_NAME = "memoire_ia.json"
+TARGET_FOLDER_NAME = "hh"  # Nom de votre dossier dans pCloud
+
+
+def get_folder_id_by_name(token, folder_name):
+  """Cherche automatiquement l'ID du dossier 'hh' dans pCloud."""
+  try:
+    url = f"https://eapi.pcloud.com/listfolder?auth={token}&folderid=0"
+    res = requests.get(url).json()
+    if res.get("result") == 0:
+      contents = res.get("metadata", {}).get("contents", [])
+      for item in contents:
+        if item.get("name") == folder_name and item.get("isfolder"):
+          return item.get("folderid")
+
+      # Si le dossier n'existe pas, on le crée
+      create_url = f"https://eapi.pcloud.com/createfolder?auth={token}&name={folder_name}&folderid=0"
+      create_res = requests.get(create_url).json()
+      if create_res.get("result") == 0:
+        return create_res.get("metadata", {}).get("folderid")
+  except Exception as e:
+    print("Erreur recherche/création dossier pCloud:", e)
+  return 0
 
 
 def get_pcloud_memory():
   if not PCLOUD_TOKEN:
     return []
   try:
-    url = f"https://eapi.pcloud.com/listfolder?auth={PCLOUD_TOKEN}&folderid=0"
+    folder_id = get_folder_id_by_name(PCLOUD_TOKEN, TARGET_FOLDER_NAME)
+    url = f"https://eapi.pcloud.com/listfolder?auth={PCLOUD_TOKEN}&folderid={folder_id}"
     res = requests.get(url).json()
     if res.get("result") == 0:
       contents = res.get("metadata", {}).get("contents", [])
@@ -47,16 +69,19 @@ def get_pcloud_memory():
 
 def save_pcloud_memory(history):
   if not PCLOUD_TOKEN:
+    print("Token pCloud manquant")
     return
   try:
+    folder_id = get_folder_id_by_name(PCLOUD_TOKEN, TARGET_FOLDER_NAME)
     tmp_file = "/tmp/memoire_ia.json"
     with open(tmp_file, "w", encoding="utf-8") as f:
       json.dump(history, f, ensure_ascii=False, indent=2)
 
-    url = f"https://eapi.pcloud.com/uploadfile?auth={PCLOUD_TOKEN}&folderid=0"
+    url = f"https://eapi.pcloud.com/uploadfile?auth={PCLOUD_TOKEN}&folderid={folder_id}"
     with open(tmp_file, "rb") as f:
       files = {"file": (PCLOUD_FILE_NAME, f)}
-      requests.post(url, files=files)
+      response = requests.post(url, files=files)
+      print("Réponse pCloud upload:", response.text)
   except Exception as e:
     print("Erreur écriture pCloud:", e)
 
@@ -121,7 +146,7 @@ def index():
 
       try:
         response = client.models.generate_content(
-            model="gemini-3.8-flash", contents=full_prompt
+            model="gemini-1.5-flash", contents=full_prompt
         )
         answer = response.text
       except Exception as e:
