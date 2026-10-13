@@ -14,7 +14,7 @@ app = Flask(__name__)
 # --- CONFIGURATION ---
 # ATTENTION : Ne jamais laisser tes clés en dur sur GitHub !
 # Utilise des variables d'environnement en production
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AQ.Ab8RN6Jz9DMjx6OaB899tCEcOrIXGvnVtple7YufzEBaD-xMYA")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "AQ.Ab8RN6Kiwe3TC_I6irDioMPhGHi_bc7xx54_MOOpjk-GXyEImA")
 PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN", "MrbSZEXNhDUAPq6zZf8MBJkZ6Fnf0yTWqbp91VmpJhTp1bPUI1qy")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
