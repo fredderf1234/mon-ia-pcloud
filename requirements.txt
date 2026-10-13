@@ -2,3 +2,5 @@ flask
 requests
 google-genai
 gunicorn
+matplotlib
+numpy
