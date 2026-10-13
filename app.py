@@ -8,10 +8,7 @@ app = Flask(__name__)
 
 # Vos clés configurées directement
 GEMINI_API_KEY = "AQ.Ab8RN6J6ouWeVgrruti_v5E1cWHrO14EnGc-j77euRCZiF6clA"
-# Utilisez votre access token pCloud (généré depuis votre application pCloud)
-PCLOUD_TOKEN = os.environ.get(
-    "PCLOUD_ACCESS_TOKEN", "2V2KSXZMrbSZquab09Inv2pQBRE7NdkBI8xAR370"
-)
+PCLOUD_TOKEN = "MrbSZEXNhDUAPq6zZf8MBJkZ6Fnf0yTWqbp91VmpJhTp1bPUI1qy"
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 PCLOUD_FILE_NAME = "memoire_ia.json"
