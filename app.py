@@ -3,6 +3,9 @@ import os
 import requests
 from flask import Flask, render_template_string, request
 from google import genai
+from google.genai import (
+    types,
+)  # Nécessaire pour configurer l'agent/instructions système
 
 app = Flask(__name__)
 
@@ -155,9 +158,20 @@ def index():
           f"{context_str}\nNouvelle question de l'utilisateur : {user_prompt}"
       )
 
+      # =========================================================================
+      # 🔴 C'EST ICI QUE TU DOIS METTRE TON SCRIPT POUR LE CONFIGURER 🔴
+      # =========================================================================
+      MON_SCRIPT_SYSTEME = """
+            Collez tout votre long script de calibrage ou vos instructions ici...
+            """
+
       try:
         response = client.models.generate_content(
-            model="gemini-3.5-flash-lite", contents=full_prompt
+            model="gemini-3.5-flash-lite",
+            contents=full_prompt,
+            config=types.GenerateContentConfig(
+                system_instruction=MON_SCRIPT_SYSTEME, temperature=0.3
+            ),
         )
         answer = response.text
       except Exception as e:
