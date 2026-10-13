@@ -157,7 +157,7 @@ def index():
 
       try:
         response = client.models.generate_content(
-            model="gemini-flash-latest", contents=full_prompt
+            model="gemini-2.0-flash", contents=full_prompt
         )
         answer = response.text
       except Exception as e:
