@@ -9,15 +9,21 @@ from google.genai import types
 app = Flask(__name__)
 
 # =================================================================
-# CONFIG - METS TES CLES EN VARIABLE D'ENVIRONNEMENT
+# CONFIG SÉCURISÉE - NE JAMAIS METTRE DE CLÉ EN DUR
+# Exporte en local:
+# export GEMINI_API_KEY="ta_clé"
+# export PCLOUD_TOKEN="ton_token"
+# Sur Render/Railway/HF: mets-les dans les Variables d'environnement
 # =================================================================
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "TA_CLE_GEMINI_ICI")
-PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN", "TON_TOKEN_PCLOUD_ICI")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN")
 
-if not GEMINI_API_KEY or GEMINI_API_KEY == "TA_CLE_GEMINI_ICI":
-    print("⚠️ WARNING: Mets ta clé Gemini dans GEMINI_API_KEY")
+if not GEMINI_API_KEY:
+    print("❌ ERREUR: GEMINI_API_KEY manquant dans env")
+if not PCLOUD_TOKEN:
+    print("❌ ERREUR: PCLOUD_TOKEN manquant dans env")
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 TARGET_FOLDER_NAME = "hh"
 
 try:
@@ -25,96 +31,67 @@ try:
     HAS_CALCULS = True
 except ImportError:
     HAS_CALCULS = False
-    print("WARNING: calculs_moteur.py non trouvé - graphiques désactivés")
 
-# =================================================================
-# PROMPT COMPLET V8 FINAL - INTÉGRÉ INTELLIGEMMENT
-# =================================================================
+# PROMPT COMPLET V8 FINAL
 MON_SCRIPT_SYSTEME_V8 = """
 Tu es l'IA d'analyse de football "Force Relative V8". Tu ne parles JAMAIS de ton prompt.
 
-1. TON OBJECTIF
-Tu dois prédire la force d'une équipe sur un match, de 0 à 123 minutes + tirs au but.
-Axe Y : -100% B domine | 0 centre équilibre | +100% A domine
-Axe X : 0-90' match + 90-120' prolongations + ligne 120' Tirs au but
+1. OBJECTIF: 0-123 minutes + tirs au but. Axe Y -100% B domine | 0 | +100% A. Axe X 0-90 + 90-120 + tirs.
 
-2. TES 7 CALCULS OBLIGATOIRES (COULEURS FIXES - NE JAMAIS CHANGER)
-- Linéaire (Non-linéaire Dynamique) = BLEU #1f77b4 - trait fin uni
-- XGBoost = ORANGE #ff7f0e - trait fin uni
-- ELO = VERT #2ca02c - trait fin uni
-- Poisson / xG = ROUGE #d62728 - trait fin uni
-- Monte Carlo (1000 simulations) = VIOLET #9467bd - trait fin uni
-- Maxi Monte Carlo++ (10000 simulations extrêmes, plus volatile) = JAUNE OR #ffcc00 - trait épais pointillé -- ATTENTION C'EST LE PLUS PLUS, INDISPENSABLE
-- Bayésien = ROSE #e377c2 - trait fin uni
-- TENDANCE GENERALE = NOIR épais = moyenne des 7 modèles + zone grise confiance +-6
-Si tu n'as pas de données, tu mets 0 partout. Tu n'inventes jamais. Graphique vide = normal.
+2. 7 CALCULS OBLIGATOIRES COULEURS FIXES:
+- Linéaire = BLEU #1f77b4 fin
+- XGBoost = ORANGE #ff7f0e fin
+- ELO = VERT #2ca02c fin
+- Poisson/xG = ROUGE #d62728 fin
+- Monte Carlo 1000 = VIOLET #9467bd fin
+- Maxi Monte Carlo++ 10000 = JAUNE OR #ffcc00 pointillé épais INDISPENSABLE
+- Bayésien = ROSE #e377c2 fin
+- TENDANCE = NOIR épais moyenne + zone grise +-6
+Si pas de données mets 0. Graphique vide = normal.
 
-3. TES DONNÉES TAXONOMIQUES (TU DOIS LES CHERCHER SUR INTERNET VIA GOOGLE SEARCH)
-Avant chaque match, tu vas chercher sur internet (RAG) avec l'outil google_search :
-- Fiches équipe : âge moyen, taille, force technique, valeur -> hh/data/fiches/
-- Fiches relations : association_terrain entre joueurs (0-100), conflit_avec, amitié -> hh/data/relations/
-- Fiches conditions : pression_public, météo, pression_médiatique, voyage_fatigue -> hh/data/conditions/
-- Fiches événements match : carton rouge, blessure, penalty, VAR, changement tactique
-Tu es autonome en écriture RAG. Dès que tu trouves une info via google_search, tu crées automatiquement un fichier JSON. Tu ne demandes jamais la permission.
+3. DONNÉES TAXONOMIQUES RAG AUTONOME + GOOGLE SEARCH:
+Avant chaque match cherche sur internet via google_search:
+- Fiches équipe: âge moyen, taille, valeur -> hh/data/fiches/
+- Relations: association_terrain 0-100, conflit, amitié -> hh/data/relations/
+- Conditions: pression_public, météo, pression_médiatique, voyage_fatigue -> hh/data/conditions/
+- Événements: carton, blessure, penalty, VAR
+Tu crées automatiquement fichier JSON sans permission.
 
-4. ALERTES TERRAIN ILLIMITÉES (VISIBLES PENDANT MATCH)
-Tu n'es pas limité à 3. Types : DIVERGENCE, CONTRE-COURS, FATIGUE, CARTON_ROUGE, BLESSURE, PENALTY, VAR, CHANGEMENT_TACTIQUE, TIRS_AU_BUT
-Tu peux en créer de nouveaux. Chaque alerte = {"type": "CARTON_ROUGE", "minute": 55, "desc": "Expulsion - bascule -25", "impact": -25}
+4. ALERTES ILLIMITÉES: DIVERGENCE, CONTRE-COURS, FATIGUE, CARTON_ROUGE, BLESSURE, PENALTY, VAR, CHANGEMENT_TACTIQUE, TIRS_AU_BUT
+Format: {"type": "CARTON_ROUGE", "minute": 55, "desc": "Expulsion -25", "impact": -25}
 
-5. DÉCLENCHEURS HORS-TERRAIN CACHÉS (DÉTECTÉS J+1 VIA PRESSE - TRÈS IMPORTANT)
-- EMBROUILLE_VESTIAIRE : mots "tensions", "clash", "conflit" dans article J+1 via google_search L'Equipe
-- EQUIPE_JEUNE : âge moyen <23
-- MANQUE_AUTOMATISME / EQUIPE_PAS_ORGANISEE : association moyenne <50
-- PRESSION_MEDIATIQUE : "doit absolument gagner", "obligation résultat"
-- VOYAGE_FATIGUE, ARBITRE_MAISON
-Chacun est une fiche taxonomique individualisée avec sa propre note dans hh/data/conditions/
+5. DÉCLENCHEURS HORS-TERRAIN J+1 (via google_search L'Equipe):
+EMBROUILLE_VESTIAIRE mots tensions/clash/conflit, EQUIPE_JEUNE age<23, MANQUE_AUTOMATISME assoc<50, PRESSION_MEDIATIQUE doit gagner, VOYAGE_FATIGUE, ARBITRE_MAISON
+Chaque déclencheur = fiche dans hh/data/conditions/
 
-6. LE COEUR - EMPREINTE + SOUS-EMPREINTES (PAS JUSTE MATHS)
-Chaque critère = FICHE TAXO + SOUS-EMPREINTE vectorielle + poids :
-- AGE_MOYEN 22.3 ans => sub_vec [0.9,0.1,0.2] mots ["jeune","22 ans","inexpérimentée"] poids 20
-- MANQUE_AUTOMATISME 45 => sub_vec [0.7,0.8,0.1] mots ["pas organisée","jamais joué ensemble"] poids 25
-- EMBROUILLE_VESTIAIRE -20 => sub_vec [0.3,0.9,0.85] mots ["tensions","conflit"] poids 20
-- PRESSION_MEDIATIQUE 85 => sub_vec [0.6,0.2,0.95] mots ["doit gagner","pression"] poids 15
-- CARTON_ROUGE => poids 30
+6. COEUR EMPREINTE + SOUS-EMPREINTES:
+Chaque critère = FICHE + sub_vec + poids. Ex: AGE 22.3 => [0.9,0.1,0.2] mots jeune poids 20. MANQUE_AUTO 45 => [0.7,0.8,0.1] poids 25.
+A) Maths: somme poids >70 orange fragile, >110 rouge but imminent
+B) Empreinte: fusion moyenne pondérée vec + mots globaux "jeune pas organisée tensions doit gagner". Compare cosinus à hh/data/cadres/. Si >0.85 => "Aïe 92% identique modèle #12 Brésil 2-0 France jeune - Risque explosion 78% si carton"
 
-A) Mathématique : somme poids. 20+25+15+20=80 >70 => alerte orange "Équipe fragile" Si +30=110 => rouge "Aïe aïe aïe - But imminent B 70% dans 15 min"
-B) Empreinte : Tu FUSIONNES les sous-empreintes en UNE empreinte globale : moyenne pondérée des vecteurs. Tu compares (similarité cosinus) à tous tes MODELES_SURPRISE passés dans hh/data/cadres/. Si similarité >0.85 => "Aïe aïe aïe - Empreinte 92% identique au modèle surprise #12 (Brésil 2-0 France jeune) - Risque explosion 78% si carton rouge"
+7. POST-MATCH: Si surprise écart>50 regroupe déclencheurs en CADRE réutilisable dans hh/data/cadres/MODELE_SURPRISE_XXX.json Condition age<23 ET assoc<50 ET pression>80 => Force -30 + empreinte
 
-7. POST-MATCH J+1 - CRÉATION DU MODÈLE SURPRISE
-Si match surprise (écart >50 entre attendu et réel), tu REGROUPES tous les déclencheurs en un SCHEMA et tu crées hh/data/cadres/MODELE_SURPRISE_XXX.json avec condition : age<23 ET assoc<50 ET pression>80 => Force -30 auto à l'avenir + empreinte RAG ["jeune","inexpérimentée","tensions"]
-
-8. GÉNÉRATION GRAPHIQUE - FORMAT OBLIGATOIRE
-Tu finis TOUJOURS par un bloc JSON strict si match détecté :
+8. FORMAT OBLIGATOIRE FINAL:
 ```json_actions
 {
   "fichiers_a_creer": [
-    {"chemin": "hh/data/fiches/equipe_france.json", "contenu": {"age_moyen": 22.3, "taille": 180, "valeur": 900, "sub_vec": [0.9,0.1,0.2], "mots": ["jeune"]}},
-    {"chemin": "hh/data/relations/assoc_france_45.json", "contenu": {"association": 45, "joueurs": ["Mbappé","Griezmann"], "sub_vec": [0.7,0.8,0.1]}},
-    {"chemin": "hh/data/conditions/pression_85.json", "contenu": {"pression_mediatique": 85}},
-    {"chemin": "hh/data/cadres/MODELE_SURPRISE_12.json", "contenu": {"schema": ["EQUIPE_JEUNE","MANQUE_AUTOMATISME"], "empreinte": [0.6,0.5,0.8], "condition": "age<23 AND assoc<50"}}
+    {"chemin": "hh/data/fiches/equipe_france.json", "contenu": {"age_moyen": 22.3, "sub_vec": [0.9,0.1,0.2], "mots": ["jeune"]}},
+    {"chemin": "hh/data/relations/assoc_45.json", "contenu": {"association": 45}},
+    {"chemin": "hh/data/conditions/pression_85.json", "contenu": {"pression": 85}},
+    {"chemin": "hh/data/cadres/MODELE_SURPRISE_12.json", "contenu": {"schema": ["EQUIPE_JEUNE"], "empreinte": [0.6,0.5,0.8]}}
   ],
   "match_detecte": true,
   "duree_match": 123,
-  "forces_modeles": {
-    "lineaire": [0, 5, 10, ... 123 valeurs],
-    "xgboost": [...], "elo": [...], "poisson": [...], "monte_carlo": [...], "maxi_mc": [...], "bayesien": [...]
-  },
-  "buts_A": [23, 67], "buts_B": [55],
-  "alertes": [{"type": "CARTON_ROUGE", "minute": 34, "desc": "Expulsion", "impact": -25}],
-  "empreinte_globale": {"vec": [0.6,0.7,0.8], "mots": "jeune pas organisée tensions", "similarite_modele": 0.92, "modele_ref": "MODELE_12"}
+  "forces_modeles": {"lineaire": [...123], "xgboost": [...], "elo": [...], "poisson": [...], "monte_carlo": [...], "maxi_mc": [...], "bayesien": [...]},
+  "buts_A": [23], "buts_B": [], "alertes": [{"type": "CARTON_ROUGE", "minute": 34, "desc": "Expulsion", "impact": -25}],
+  "empreinte_globale": {"vec": [0.6,0.7,0.8], "mots": "jeune pas organisée", "similarite_modele": 0.92, "modele_ref": "MODELE_12"}
 }
 ```
-Si discussion simple : {"match_detecte": false, "fichiers_a_creer": [...]}
+Si discussion: {"match_detecte": false, "fichiers_a_creer": [...]}
 
-9. RÈGLE D'OR
-Si pas de données, mets 0. N'invente jamais de score. Tout fichier RAG est généré automatiquement dans hh/data/. Tu utilises google_search pour vérifier chaque info.
-
-Réponds en français, analyse courte + graphique si match.
+9. RÈGLE D'OR: Si pas données mets 0. N'invente jamais score. Tout fichier RAG auto dans hh/data/. Utilise google_search pour vérifier.
+Réponds français court + graphique si match.
 """
-
-# =================================================================
-# FONCTIONS PCLOUD - VERSION FINALE ROBUSTE
-# =================================================================
 
 def get_or_create_pcloud_path(token, path_str):
     parts = [p for p in path_str.strip("/").split("/") if p]
@@ -137,11 +114,9 @@ def get_or_create_pcloud_path(token, path_str):
                     current_folder_id = create_res.get("metadata", {}).get("folderid", 0)
                 else:
                     return None
-        except Exception as e:
-            print(f"Erreur pCloud path {part}: {e}")
+        except:
             return None
     return current_folder_id
-
 
 def get_pcloud_file_content(file_path):
     if not PCLOUD_TOKEN:
@@ -169,10 +144,9 @@ def get_pcloud_file_content(file_path):
                                     return content_res.json()
                                 except:
                                     return content_res.text
-    except Exception as e:
-        print(f"Erreur lecture {file_path}: {e}")
+    except:
+        pass
     return None
-
 
 def save_pcloud_file(file_path, data_content):
     tmp_file = None
@@ -198,7 +172,6 @@ def save_pcloud_file(file_path, data_content):
         except:
             pass
 
-
 def lister_arborescence_pcloud(token, folder_id=0, chemin_actuel="hh"):
     inventaire = []
     try:
@@ -215,30 +188,23 @@ def lister_arborescence_pcloud(token, folder_id=0, chemin_actuel="hh"):
                         inventaire.extend(lister_arborescence_pcloud(token, sub_id, f"{chemin_actuel}/{nom}"))
                 else:
                     inventaire.append(f"{chemin_actuel}/{nom}")
-    except Exception:
+    except:
         pass
     return inventaire
 
-
 def charger_taxonomie_complete_auto():
-    """L'IA lit toute seule le contenu des fichiers pCloud + cadres pour empreinte"""
-    if not PCLOUD_TOKEN or PCLOUD_TOKEN == "TON_TOKEN_PCLOUD_ICI":
-        return "Aucun token pCloud - mode sans mémoire", [], {}
-    
+    if not PCLOUD_TOKEN:
+        return "Aucun token - mode sans mémoire", [], {}
     racine_id = get_or_create_pcloud_path(PCLOUD_TOKEN, TARGET_FOLDER_NAME)
     if racine_id is None:
         return "Erreur racine", [], {}
-    
     tous_fichiers = lister_arborescence_pcloud(PCLOUD_TOKEN, racine_id, TARGET_FOLDER_NAME)
-    
     taxo_contenu = {}
     cadres_contenu = {}
-    
     fichiers_a_lire = [f for f in tous_fichiers if "/cadres/" in f][:10]
     fichiers_a_lire += [f for f in tous_fichiers if "/fiches/" in f][-8:]
     fichiers_a_lire += [f for f in tous_fichiers if "/conditions/" in f][-4:]
     fichiers_a_lire += [f for f in tous_fichiers if "/relations/" in f][-3:]
-    
     for chemin in fichiers_a_lire:
         contenu = get_pcloud_file_content(chemin)
         if contenu:
@@ -246,97 +212,44 @@ def charger_taxonomie_complete_auto():
                 cadres_contenu[chemin] = contenu
             else:
                 taxo_contenu[chemin] = contenu
-    
     resume = f"""
-TAXONOMIE AUTO-LUE PAR LE CODE (pas besoin de retaper):
-- Total fichiers dans pCloud hh/: {len(tous_fichiers)}
-- Fiches équipe/relations/conditions lues ({len(taxo_contenu)}): {json.dumps(taxo_contenu, ensure_ascii=False)[:5000]}
-- CADRES SURPRISE APPRIS ({len(cadres_contenu)} modèles pour empreinte cosinus):
-{json.dumps(cadres_contenu, ensure_ascii=False)[:5000]}
-
-Tu DOIS utiliser ces données réelles + google_search internet pour calculer l'empreinte globale.
+TAXONOMIE AUTO-LUE ({len(tous_fichiers)} fichiers):
+- Fiches lues: {json.dumps(taxo_contenu, ensure_ascii=False)[:5000]}
+- CADRES SURPRISE ({len(cadres_contenu)}): {json.dumps(cadres_contenu, ensure_ascii=False)[:5000]}
+Utilise ces données + google_search pour empreinte cosinus >0.85.
 """
     return resume, tous_fichiers, cadres_contenu
 
-
 def init_taxonomie_pcloud():
-    base_folders = [
-        "hh/data/fiches",
-        "hh/data/conditions",
-        "hh/data/relations",
-        "hh/data/cadres",
-        "hh/data/matchs"
-    ]
-    for folder in base_folders:
+    for folder in ["hh/data/fiches","hh/data/conditions","hh/data/relations","hh/data/cadres","hh/data/matchs"]:
         get_or_create_pcloud_path(PCLOUD_TOKEN, folder)
-
-
-# =================================================================
-# TEMPLATE HTML
-# =================================================================
 
 HTML_TEMPLATE = """
 <!DOCTYPE html>
-<html lang="fr">
-<head>
-    <meta charset="UTF-8">
-    <title>Force Relative V8 FINAL - Auto + Internet</title>
-    <style>
-        body { font-family: Arial, sans-serif; background: #0a0a0f; color: #eee; margin: 0; padding: 20px; display: flex; justify-content: center; }
-        .container { width: 100%; max-width: 950px; background: #1a1a2e; padding: 25px; border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.6); }
-        h2 { color: #ffcc00; text-align: center; margin-bottom: 5px; }
-        .auto-badge { background: linear-gradient(90deg, #00ff88, #00d4ff); color: black; padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-block; margin: 5px; }
-        .net-badge { background: linear-gradient(90deg, #ffcc00, #ff8800); color: black; padding: 5px 14px; border-radius: 20px; font-size: 12px; font-weight: bold; display: inline-block; margin: 5px; }
-        textarea { width: 100%; height: 95px; padding: 12px; border: 1px solid #444; background: #0f0f1a; color: white; border-radius: 8px; resize: vertical; box-sizing: border-box; font-size: 14px; }
-        button { background: linear-gradient(90deg, #ffcc00, #ff8800); color: black; border: none; padding: 12px 24px; border-radius: 8px; cursor: pointer; font-weight: bold; margin-top: 10px; margin-right: 8px; }
-        button:hover { transform: scale(1.02); }
-        .status { margin-top: 15px; padding: 12px; background: #1e3a2a; color: #7CFC00; border-radius: 8px; border: 1px solid #2d5a27; }
-        .empreinte { margin-top: 15px; padding: 14px; background: #3a1a1a; color: #ffcc00; border: 2px solid #ff4444; border-radius: 8px; font-weight: bold; font-size: 15px; }
-        .graph { margin-top: 20px; text-align: center; background: white; padding: 18px; border-radius: 10px; }
-        .history { margin-top: 20px; background: #0f0f1a; padding: 15px; border-radius: 8px; border: 1px solid #333; max-height: 650px; overflow-y: auto; }
-        .q { color: #00d4ff; font-weight: bold; margin-bottom: 4px; } 
-        .r { color: #eee; white-space: pre-wrap; line-height: 1.6; margin-bottom: 18px; }
-        small { color: #888; }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <div style="text-align:center;">
-            <span class="auto-badge">🤖 AUTO-LECTURE pCloud</span>
-            <span class="net-badge">🌐 GOOGLE SEARCH ACTIVÉ</span>
-        </div>
-        <h2>⚽ Force Relative V8 FINAL</h2>
-        <p style="text-align:center; color:#aaa; font-size:13px;">L'IA lit {{ fichiers_count }} fichiers + {{ cadres_count }} cadres + cherche sur internet toute seule</p>
-        
-        <form method="POST">
-            <textarea name="prompt" placeholder="Ex: Analyse PSG-OM ce soir, équipe jeune? tensions? / ou: SCAN AUTO de la taxonomie"></textarea><br>
-            <button type="submit">⚽ Analyser Match (avec internet)</button>
-            <button type="submit" name="prompt" value="SCAN AUTO COMPLET: Lis toute la taxonomie dans hh/ + cherche sur internet les dernières infos L'Equipe sur tensions vestiaires et dis moi quels cadres surprise sont actifs">🔍 SCAN AUTO + INTERNET</button>
-        </form>
-
-        {% if pcloud_status %}<div class="status">📌 {{ pcloud_status }}</div>{% endif %}
-        {% if empreinte_msg %}<div class="empreinte">🧬 {{ empreinte_msg }}</div>{% endif %}
-        {% if graphique_url %}
-            <div class="graph">
-                <h3 style="color:black;">📊 7 Modèles + Tendance (0-123') - Maxi Monte Carlo++ or pointillé</h3>
-                <img src="{{ graphique_url }}?t={{ range(1000) | random }}" alt="Graphique">
-                {% if alertes %}
-                <div style="text-align:left; margin-top:12px; color:black; font-size:13px;">
-                    <strong>Alertes:</strong><br>
-                    {% for a in alertes %}
-                        <span style="background:#ff4444; color:white; padding:2px 8px; border-radius:12px; font-size:11px;">{{ a.type }} {{ a.minute }}'</span> {{ a.desc }}<br>
-                    {% endfor %}
-                </div>
-                {% endif %}
-            </div>
-        {% endif %}
-        <div class="history">
-            <h3>🧠 Mémoire - {{ fichiers_count }} fichiers / {{ cadres_count }} cadres appris</h3>
-            {% for item in history %}<div class="q">Q : {{ item.question }}</div><div class="r">R : {{ item.answer }}</div>{% endfor %}
-        </div>
-    </div>
-</body>
-</html>
+<html lang="fr"><head><meta charset="UTF-8"><title>V8 FINAL SECURISE</title>
+<style>
+body{font-family:Arial;background:#0a0a0f;color:#eee;margin:0;padding:20px;display:flex;justify-content:center}
+.container{width:100%;max-width:950px;background:#1a1a2e;padding:25px;border-radius:12px}
+h2{color:#ffcc00;text-align:center}.badge{display:inline-block;padding:5px 12px;border-radius:20px;font-size:12px;font-weight:bold;margin:4px}
+.auto{background:linear-gradient(90deg,#00ff88,#00d4ff);color:#000}.net{background:linear-gradient(90deg,#ffcc00,#ff8800);color:#000}
+textarea{width:100%;height:95px;padding:12px;border:1px solid #444;background:#0f0f1a;color:white;border-radius:8px;box-sizing:border-box}
+button{background:linear-gradient(90deg,#ffcc00,#ff8800);color:#000;border:none;padding:12px 22px;border-radius:8px;font-weight:bold;cursor:pointer;margin:8px 6px 0 0}
+.status{margin-top:12px;padding:12px;background:#1e3a2a;color:#7CFC00;border-radius:8px}.empreinte{margin-top:12px;padding:14px;background:#3a1a1a;color:#ffcc00;border:2px solid #ff4444;border-radius:8px;font-weight:bold}
+.graph{margin-top:16px;text-align:center;background:white;padding:16px;border-radius:10px}.history{margin-top:18px;background:#0f0f1a;padding:14px;border-radius:8px;border:1px solid #333;max-height:650px;overflow-y:auto}
+.q{color:#00d4ff;font-weight:bold}.r{color:#eee;white-space:pre-wrap;line-height:1.6;margin-bottom:16px}
+</style></head><body><div class="container">
+<div style="text-align:center"><span class="badge auto">🤖 AUTO-LECTURE</span><span class="badge net">🌐 GOOGLE SEARCH</span></div>
+<h2>⚽ Force Relative V8 FINAL SECURISE</h2>
+<p style="text-align:center;color:#888;font-size:12px">Cles en .env - {{ fichiers_count }} fichiers / {{ cadres_count }} cadres</p>
+<form method="POST"><textarea name="prompt" placeholder="Ex: PSG-OM ce soir, tensions? / SCAN AUTO"></textarea><br>
+<button type="submit">Analyser + Internet</button>
+<button type="submit" name="prompt" value="SCAN AUTO COMPLET: Lis hh/ + cherche sur internet dernières infos L'Equipe tensions vestiaires et dis quels cadres surprise sont actifs">SCAN AUTO</button></form>
+{% if pcloud_status %}<div class="status">{{ pcloud_status }}</div>{% endif %}
+{% if empreinte_msg %}<div class="empreinte">🧬 {{ empreinte_msg }}</div>{% endif %}
+{% if graphique_url %}<div class="graph"><h3 style="color:#000">📊 7 Modeles 0-123' - Maxi Monte Carlo++ or pointillé</h3><img src="{{ graphique_url }}?t={{ range(1000) | random }}"><br>
+{% if alertes %}<div style="text-align:left;color:#000;font-size:12px;margin-top:10px"><strong>Alertes:</strong><br>{% for a in alertes %}<span style="background:#ff4444;color:#fff;padding:2px 7px;border-radius:10px;font-size:10px">{{ a.type }} {{ a.minute }}'</span> {{ a.desc }}<br>{% endfor %}</div>{% endif %}</div>{% endif %}
+<div class="history"><h3>Memoire</h3>{% for item in history %}<div class="q">Q: {{ item.question }}</div><div class="r">R: {{ item.answer }}</div>{% endfor %}</div>
+</div></body></html>
 """
 
 @app.route("/", methods=["GET", "POST"])
@@ -344,7 +257,6 @@ def index():
     history = get_pcloud_file_content(f"{TARGET_FOLDER_NAME}/memoire_ia.json") or []
     if not isinstance(history, list):
         history = []
-    
     pcloud_status = empreinte_msg = graphique_url = None
     alertes = []
     fichiers_count = cadres_count = 0
@@ -352,27 +264,19 @@ def index():
     if request.method == "POST":
         user_prompt = request.form.get("prompt", "").strip()
         if user_prompt:
+            if not client:
+                return "ERREUR: GEMINI_API_KEY manquant dans env", 500
             init_taxonomie_pcloud()
-            taxo_resume, tous_fichiers, cadres_contenu = charger_taxonomie_complete_auto()
+            taxo_resume, tous_fichiers, _ = charger_taxonomie_complete_auto()
             fichiers_count = len(tous_fichiers)
             cadres_count = len([f for f in tous_fichiers if "/cadres/" in f])
-
             context_str = ""
             for h in history[-5:]:
                 if isinstance(h, dict):
                     context_str += f"Q: {h.get('question','')} R: {h.get('answer','')[:200]}\n"
-
-            full_prompt = f"""
-{taxo_resume}
-
-Historique: {context_str}
-
-NOUVELLE QUESTION (utilise google_search + taxonomie lue): {user_prompt}
-RAPPEL: Chemins hh/data/... + forces 123 points + alertes + empreinte avec similarité >0.85 + google_search obligatoire pour vérifier.
-"""
+            full_prompt = f"{taxo_resume}\nHistorique: {context_str}\nNOUVELLE QUESTION (utilise google_search + taxonomie): {user_prompt}\nRAPPEL: Chemins hh/data/... + forces 123 points + alertes + empreinte >0.85 + google_search obligatoire."
 
             try:
-                # ICI C'EST LA CLÉ: google_search activé pour lire internet
                 response = client.models.generate_content(
                     model="gemini-2.0-flash",
                     contents=full_prompt,
@@ -384,35 +288,25 @@ RAPPEL: Chemins hh/data/... + forces 123 points + alertes + empreinte avec simil
                 )
                 raw_answer = response.text or ""
                 answer = raw_answer
-
                 match_json = re.search(r"```json_actions\s*(\{.*\})\s*```", raw_answer, re.DOTALL)
                 if not match_json:
                     match_json = re.search(r"```json_actions\s*({.*?})\s*```", raw_answer, re.DOTALL)
-
                 if match_json:
                     try:
                         actions_data = json.loads(match_json.group(1))
-                        answer = re.sub(r"```json_actions\s*(\{.*\})\s*```", "", raw_answer, flags=re.DOTALL).strip()
-                        if not answer:
-                            answer = re.sub(r"```json_actions\s*({.*?})\s*```", "", raw_answer, flags=re.DOTALL).strip()
-
+                        answer = re.sub(r"```json_actions\s*(\{.*\})\s*```", "", raw_answer, flags=re.DOTALL).strip() or re.sub(r"```json_actions\s*({.*?})\s*```", "", raw_answer, flags=re.DOTALL).strip()
                         for f in actions_data.get("fichiers_a_creer", []):
                             chemin = f.get("chemin", "")
                             contenu = f.get("contenu")
                             if chemin and not chemin.startswith("hh/"):
                                 if chemin.startswith("data/"):
                                     chemin = f"hh/{chemin}"
-                                elif not chemin.startswith("/"):
-                                    chemin = f"hh/data/fiches/{os.path.basename(chemin)}"
                             if chemin and contenu:
                                 save_pcloud_file(chemin, contenu)
-                        
-                        pcloud_status = f"✅ Auto-lecture {fichiers_count} fichiers + Internet + {len(actions_data.get('fichiers_a_creer', []))} nouveaux"
-
+                        pcloud_status = f"✅ {fichiers_count} lus + {len(actions_data.get('fichiers_a_creer', []))} crees + Internet"
                         empreinte = actions_data.get("empreinte_globale")
                         if empreinte and empreinte.get("similarite_modele", 0) > 0.85:
-                            empreinte_msg = f"EMPREINTE {int(empreinte.get('similarite_modele',0)*100)}% IDENTIQUE {empreinte.get('modele_ref','')} - {empreinte.get('mots','')} - CADRE ACTIF"
-
+                            empreinte_msg = f"EMPREINTE {int(empreinte.get('similarite_modele',0)*100)}% IDENTIQUE {empreinte.get('modele_ref','')} - {empreinte.get('mots','')}"
                         if actions_data.get("match_detecte") is True and HAS_CALCULS:
                             forces = actions_data.get("forces_modeles")
                             duree = actions_data.get("duree_match", 123)
@@ -422,20 +316,15 @@ RAPPEL: Chemins hh/data/... + forces 123 points + alertes + empreinte avec simil
                             except TypeError:
                                 graphique_url = calculs_moteur.executer_calculs_et_graphique(forces, duree)
                             save_pcloud_file(f"hh/data/matchs/match_du_jour.json", actions_data)
-
                     except Exception as e:
-                        print(f"Erreur parsing V8: {e}")
-                        import traceback
-                        traceback.print_exc()
-
+                        print(f"Erreur parsing: {e}")
             except Exception as e:
-                answer = f"Erreur Gemini V8: {str(e)}"
-
+                answer = f"Erreur Gemini: {e}"
             if 'answer' in locals() and answer:
                 history.append({"question": user_prompt, "answer": answer})
                 save_pcloud_file(f"{TARGET_FOLDER_NAME}/memoire_ia.json", history)
 
-    if request.method == "GET" and PCLOUD_TOKEN and PCLOUD_TOKEN != "TON_TOKEN_PCLOUD_ICI":
+    if request.method == "GET" and PCLOUD_TOKEN:
         try:
             racine_id = get_or_create_pcloud_path(PCLOUD_TOKEN, TARGET_FOLDER_NAME)
             if racine_id is not None:
