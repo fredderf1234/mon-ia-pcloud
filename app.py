@@ -244,7 +244,7 @@ def index():
                 try:
                     # MODELE MIS A JOUR SUITE A TON SCREENSHOT - 3.8-flash est le nouveau qui a internet
                     response = client.models.generate_content(
-                        model="gemini-3.8-flash",
+                        model="gemini-3.5-flash-lite",
                         contents=full_prompt,
                         config=types.GenerateContentConfig(
                             system_instruction=MON_SCRIPT_SYSTEME, 
