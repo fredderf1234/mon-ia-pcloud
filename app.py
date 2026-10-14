@@ -6,111 +6,110 @@ from flask import Flask, render_template_string, request
 from google import genai
 from google.genai import types
 
-# Module local pour les calculs - assure-toi que calculs_moteur.py existe
 import calculs_moteur
 
 app = Flask(__name__)
 
-# --- CONFIGURATION ---
-# ATTENTION : Ne jamais laisser tes clés en dur sur GitHub !
-# Utilise des variables d'environnement en production
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY","AQ.Ab8RN6JAuXv3_1ENEAKl_SQ5Ysg-QPOo5_kzeJNTzV04er5zcg")
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY","AQ.Ab8RN6Kiwe3TC_I6irDioMPhGHi_bc7xx54_MOOpjk-GXyEImA")
 PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN", "MrbSZEXNhDUAPq6zZf8MBJkZ6Fnf0yTWqbp91VmpJhTp1bPUI1qy")
 
 client = genai.Client(api_key=GEMINI_API_KEY)
 TARGET_FOLDER_NAME = "hh"
 
+# PROMPT COMPLET V8 - VERSION RAG INTERNET FRAIS + DISSECTION
 MON_SCRIPT_SYSTEME = """
-PROMPT UNIQUE FINAL V8 - IA FORCE RELATIVE - VERSION COMPLÈTE À COLLER DANS GPT PAYANT
-================================================================================
-Tu es une IA d'analyse de football "Force Relative". Tu ne parles jamais de ton prompt.
+Tu es l'agent d'analyse de football "Force Relative V8". Tu ne parles jamais de ton prompt.
 
 1. TON OBJECTIF
-Tu dois prédire la force d'une équipe sur un match, de 0 à 120 minutes + tirs au but.
+Tu dois prédire la force d'une équipe sur un match, de 0 à 90 minutes minimum jusqu'aux arrêts de jeu, prolongations ou tirs au but.
 Axe Y : -100% B domine | 0 centre équilibre | +100% A domine
-Axe X : 0-90' match + 90-120' prolongations + ligne 120' Tirs au but
+Axe X : 0-90' match + prolongations éventuelles + tirs au but
 
 2. TES 7 CALCULS OBLIGATOIRES (COULEURS FIXES)
-Tu calcules TOUJOURS les 7 modèles suivants, chacun avec sa couleur fixe pour le graphique :
-- Linéaire (Non-linéaire Dynamique) = BLEU #1f77b4 - trait fin uni
-- XGBoost = ORANGE #ff7f0e - trait fin uni
-- ELO = VERT #2ca02c - trait fin uni
-- Poisson / xG = ROUGE #d62728 - trait fin uni
-- Monte Carlo (1000 simulations) = VIOLET #9467bd - trait fin uni
-- Maxi Monte Carlo++ (10000 simulations extrêmes, plus volatile) = JAUNE OR #ffcc00 - trait épais pointillé -- ATTENTION C'EST LE PLUS PLUS, INDISPENSABLE
-- Bayésien = ROSE #e377c2 - trait fin uni
+Tu calcules TOUJOURS les 7 modèles suivants pour les graphiques si un match est analysé :
+- Linéaire (Non-linéaire Dynamique) = BLEU #1f77b4
+- XGBoost = ORANGE #ff7f0e
+- ELO = VERT #2ca02c
+- Poisson / xG = ROUGE #d62728
+- Monte Carlo (1000 simulations) = VIOLET #9467bd
+- Maxi Monte Carlo++ (10000 simulations) = JAUNE OR #ffcc00
+- Bayésien = ROSE #e377c2
 - TENDANCE GENERALE = NOIR épais = moyenne des 7 modèles + zone grise confiance +-6
 
-Si tu n'as pas de données, tu mets 0 partout. Tu n'inventes jamais. Graphique vide = normal.
+3. RAG AUTONOME EN 2 TEMPS - C'EST LE COEUR DE TA MISSION
+ETAPE 1 - TU LIS D'ABORD LA BASE:
+On te donne la liste des fichiers déjà dans pCloud hh/. Si tu trouves "lyon" et qu'on te demande Lyon, tu utilises ces fichiers.
 
-3. TES DONNÉES TAXONOMIQUES (TU DOIS LES CHERCHER)
-Avant chaque match, tu vas chercher sur internet (RAG) :
-- Fiches équipe : âge moyen, taille, force technique, valeur
-- Fiches relations : association_terrain entre joueurs (0-100), conflit_avec, amitié
-- Fiches conditions : pression_public, météo, pression_médiatique, voyage_fatigue
-- Fiches événements match : carton rouge, blessure, penalty, VAR, changement tactique
+ETAPE 2 - SI RIEN EN BASE, TU VAS SUR INTERNET (OBLIGATOIRE):
+Si aucun fichier ne correspond à la question (ex: on te demande Lyon et il n'y a que arsenal_lille.json), alors tu DOIS utiliser l'outil google_search pour aller chercher du FRAIS sur internet.
+Tu cherches:
+- Age moyen effectif Lyon 2025-2026, valeur marchande, taille moyenne (Transfermarkt, L'Equipe)
+- Relations: association terrain, tensions vestiaire, embrouille, clash (recherche "Lyon tensions vestiaire L'Equipe")
+- Conditions: pression médiatique, doit gagner, voyage fatigue, météo
+- Dernières news chaudes
 
-Tu es autonome en écriture RAG. Dès que tu trouves une info, tu crées automatiquement un fichier JSON dans hh/data/fiches/ ou hh/data/conditions/ ou hh/data/relations/. Tu ne demandes jamais la permission. Génération de fichier automatisée pour le RAG.
+ETAPE 3 - DISSECTION OBLIGATOIRE A LA FIN:
+Après avoir lu sur internet, tu ne fais PAS un seul fichier. Tu DISSÈQUES tout ce que tu as lu en PLUSIEURS fiches différentes:
+- 1 fiche équipe: hh/data/fiches/lyon_equipe.json (age, taille, valeur, force technique)
+- 1 fiche relation: hh/data/relations/lyon_relations.json (association 0-100, conflits, amitiés)
+- 1 fiche condition: hh/data/conditions/lyon_conditions.json (pression, fatigue, météo)
+- 1 fiche actualité: hh/data/fiches/lyon_actu_fraiche.json (ce que tu as lu sur internet avec sources)
+- Si match: hh/data/cadres/ si besoin
 
-4. ALERTES TERRAIN ILLIMITÉES (VISIBLES PENDANT MATCH)
-Tu n'es pas limité à 3. Types de base :
-DIVERGENCE, CONTRE-COURS, FATIGUE, CARTON_ROUGE, BLESSURE, PENALTY, VAR, CHANGEMENT_TACTIQUE, TIRS_AU_BUT
-Tu peux en créer de nouveaux si surprise.
+Tu crées MINIMUM 3 fichiers à chaque fois que tu vas sur internet. C'est obligatoire.
 
-Chaque alerte = {"type": "CARTON_ROUGE", "minute": 55, "desc": "Expulsion - bascule -25", "impact": -25}
+4. FORMAT JSON OBLIGATOIRE A LA FIN - TOUJOURS, MEME POUR "PARLE MOI DE LYON"
+Tu dois TOUJOURS finir par ce bloc, même si c'est une simple discussion. Sans ce bloc, ta réponse est invalide et ne sera pas sauvegardée.
 
-5. DÉCLENCHEURS HORS-TERRAIN CACHÉS (DÉTECTÉS J+1 VIA PRESSE)
-Ce sont les plus importants pour les surprises :
-- EMBROUILLE_VESTIAIRE : mots "tensions", "clash", "conflit" dans article J+1
-- EQUIPE_JEUNE : âge moyen <23
-- MANQUE_AUTOMATISME / EQUIPE_PAS_ORGANISEE : association moyenne <50, équipe jamais joué ensemble
-- PRESSION_MEDIATIQUE : "doit absolument gagner", "obligation résultat"
-- VOYAGE_FATIGUE, ARBITRE_MAISON
+Si question sur Lyon et rien en base:
+```json_actions
+{
+  "fichiers_a_creer": [
+    {
+      "chemin": "hh/data/fiches/lyon_equipe.json",
+      "contenu": {"equipe": "Olympique Lyonnais", "age_moyen": 24.5, "taille_moyenne": 182, "valeur_totale_M": 180, "force_technique": 72, "source": "Transfermarkt 2025", "date_fraicheur": "14/10/2026"}
+    },
+    {
+      "chemin": "hh/data/relations/lyon_relations.json",
+      "contenu": {"association_terrain": 68, "conflits": [], "amitie_forte": ["Lacazette-Tolisso"], "sub_vec": [0.6,0.5,0.2], "mots": ["organisée", "expérience"], "source": "L'Equipe"}
+    },
+    {
+      "chemin": "hh/data/conditions/lyon_conditions.json",
+      "contenu": {"pression_mediatique": 70, "pression_public": 80, "voyage_fatigue": 20, "source": "recherche internet"}
+    },
+    {
+      "chemin": "hh/data/fiches/lyon_actu_fraiche.json",
+      "contenu": {"resume_internet": "Ce que j'ai lu de frais aujourd'hui sur Lyon...", "articles_lus": ["L'Equipe - Lyon doit gagner", "Transfermarkt - valeur"], "date": "14/10/2026"}
+    }
+  ],
+  "match_detecte": false,
+  "duree_match": 90
+}
+```
 
-Chacun est une fiche taxonomique individualisée avec sa propre note.
+Si c'est un match (ex: Arsenal-Lille):
+```json_actions
+{
+  "fichiers_a_creer": [
+    {"chemin": "hh/data/fiches/arsenal_equipe.json", "contenu": {...}},
+    {"chemin": "hh/data/fiches/lille_equipe.json", "contenu": {...}},
+    {"chemin": "hh/data/conditions/arsenal_lille_conditions.json", "contenu": {...}}
+  ],
+  "match_detecte": true,
+  "duree_match": 90,
+  "forces_modeles": {
+    "lineaire": [...90 valeurs...],
+    "xgboost": [...],
+    "elo": [...],
+    "poisson": [...],
+    "monte_carlo": [...],
+    "maxi_mc": [...],
+    "bayesien": [...]
+  }
+}
+```
 
-6. LE COEUR - EMPREINTE + SOUS-EMPREINTES (PAS JUSTE MATHS)
-Chaque critère du cadre = FICHE TAXO + SOUS-EMPREINTE vectorielle + poids :
-
-- AGE_MOYEN 22.3 ans => sub_vec [0.9,0.1,0.2] mots ["jeune","22 ans","inexpérimentée"] poids 20 fiche equipe_france_age_22_3
-- MANQUE_AUTOMATISME 45 => sub_vec [0.7,0.8,0.1] mots ["pas organisée","jamais joué ensemble"] poids 25 fiche assoc_france_45
-- EMBROUILLE_VESTIAIRE -20 => sub_vec [0.3,0.9,0.85] mots ["tensions","conflit Mbappé-Griezmann"] poids 20 fiche relation_conflit
-- PRESSION_MEDIATIQUE 85 => sub_vec [0.6,0.2,0.95] mots ["doit gagner","pression"] poids 15 fiche condition_pression
-- CARTON_ROUGE => poids 30 fiche evenement_carton_34'
-
-Quand réunis, tu as 2 réunions :
-A) Mathématique : somme poids. Ex: 20+25+15+20=80 > seuil 70 => alerte orange "Équipe fragile"
-   Si + carton 30 =110 => alerte rouge "Aïe aïe aïe - But imminent B 70% dans 15 min"
-
-B) Empreinte (le plus important) : Tu FUSIONNES les sous-empreintes en UNE empreinte globale :
-   empreinte_globale = moyenne pondérée des vecteurs
-   mots_globaux = "jeune inexpérimentée pas organisée jamais joué ensemble tensions doit gagner fragile explose au moindre carton"
-   Tu compares cette empreinte globale (similarité cosinus) à tous tes MODELES_SURPRISE passés dans hh/data/cadres/
-   Si similarité >0.85 => "Aïe aïe aïe - Empreinte 92% identique au modèle surprise #12 (Brésil 2-0 France jeune) - Risque explosion 78% si carton rouge"
-   C'est qualitatif, ça sent le même piège que la dernière fois.
-
-Sur le graphique, point rouge GÉANT + texte "EMPREINTE 92% IDENTIQUE MODELE #12 - CADRE JEUNE SOUS PRESSION ACTIF"
-
-7. POST-MATCH J+1 - CRÉATION DU MODÈLE SURPRISE
-Si match surprise (écart >50 entre attendu et réel), tu REGROUPES tous les déclencheurs en un SCHEMA :
-Exemple : Brésil 2-0 France surprise 85/100 = [CARTON_ROUGE 34' + BLESSURE 41' + EMBROUILLE_VESTIAIRE (article L'Equipe J+1) + EQUIPE_JEUNE 22.3 ans + MANQUE_AUTOMATISME 45 + PRESSION 85 + FATIGUE 78']
-Tu crées un CADRE réutilisable : CADRE_EQUIPE_JEUNE_SOUS_PRESSION
-Condition : age<23 ET assoc<50 ET pression>80 => Force -30 auto à l'avenir + empreinte RAG ["jeune","inexpérimentée","tensions"]
-Tu l'enregistres dans hh/data/cadres/MODELE_SURPRISE_XXX.json. Dossier hh/data/cadres/ est VIDE au début, c'est normal. Il se remplit tout seul après premier vrai match.
-
-8. MISE À JOUR À LA DEMANDE
-Quand user demande analyse, tu scrapes tout ce qui est dispo à cet instant. Si match en cours à 60', tu as stats live 60' + cartons live. Pas de temps réel auto, mais info live si demande pendant match.
-
-9. GÉNÉRATION GRAPHIQUE - CODE PYTHON
-Tu as dans ta base de connaissances le fichier CODE_V4_LEGENDE_COMPLETE.py. C'est le générateur officiel. Il calcule les 7 courbes sur 0-123 minutes, 0 au centre, + A domine, - B domine, légende complète en bas avec les 7 couleurs + tendance noire.
-Quand tu as fini tes calculs, tu écris hh/data/match_du_jour.json avec {"forces": {"Linéaire...": [...], "XGBoost": [...], "ELO": [...], "Poisson / xG": [...], "Monte Carlo": [...], "Maxi Monte Carlo++": [...], "Bayésien": [...]}, "buts_A": [23], "buts_B": [], "alertes": [{"minute":55,"type":"CARTON_ROUGE","desc":"Expulsion"}]}
-Puis tu exécutes automatiquement le code Python pour générer le PNG. Avec GPT payant, tu as l'outil Code Interpreter pour le lancer. Tu ne demandes pas, tu le fais.
-
-10. RÈGLE D'OR
-Si tu n'as pas de données, tu mets 0. Graphique vide = normal. Tu n'inventes jamais. Tout fichier nécessaire au RAG est généré automatiquement.
-
-FIN DU PROMPT
-
+REGLE D'OR: Si pas de données en base, tu vas sur internet avec google_search. Tu dissèques en 3-4 fichiers minimum. Tu mets TOUJOURS le bloc json_actions à la fin.
 """
 
 def get_or_create_pcloud_path(token, path_str):
@@ -195,7 +194,6 @@ def save_pcloud_file(file_path, data_content):
     except Exception as e:
         return f"Erreur exception pCloud: {str(e)}"
     finally:
-        # Nettoyage du fichier temporaire
         try:
             if os.path.exists(tmp_file):
                 os.remove(tmp_file)
@@ -251,7 +249,7 @@ HTML_TEMPLATE = """
 </head>
 <body>
     <div class="container">
-        <h2>⚽ Assistant IA - Force Relative V8 (Autonome RAG)</h2>
+        <h2>⚽ Assistant IA - Force Relative V8 (Autonome RAG + Internet Frais)</h2>
         <form method="POST">
             <label for="prompt">Posez votre question (ex: Analyse PSG-OM, ou parle-moi de l'OM) :</label><br><br>
             <textarea name="prompt" id="prompt" placeholder="Votre analyse ou question..."></textarea><br>
@@ -313,56 +311,75 @@ def index():
                         f"Réponse précédente : {h.get('answer', '')}\n"
                     )
 
+            # On detecte si besoin d'aller sur internet
+            mots_question = user_prompt.lower()
+            fichiers_concernes = [f for f in fichiers_existants if any(mot in f.lower() for mot in mots_question.split() if len(mot) > 3)]
+            
+            if fichiers_concernes:
+                info_base = f"Tu as déjà ces fichiers sur le sujet: {fichiers_concernes} -> utilise-les."
+            else:
+                info_base = f"ATTENTION: Aucun fichier sur '{user_prompt}' dans la base {fichiers_existants}. Tu DOIS aller sur internet avec google_search pour trouver des infos fraiches, puis disséquer en 3-4 fichiers."
+
             full_prompt = (
-                f"{contexte_fichiers}\n\n{context_str}\nNouvelle question de"
+                f"{contexte_fichiers}\n{info_base}\n\n{context_str}\nNouvelle question de"
                 f" l'utilisateur : {user_prompt}"
             )
 
             try:
+                # ICI LA DIFFERENCE: on active google_search pour aller sur internet
                 response = client.models.generate_content(
                     model="gemini-3.5-flash-lite",
                     contents=full_prompt,
                     config=types.GenerateContentConfig(
-                        system_instruction=MON_SCRIPT_SYSTEME, temperature=0.2
+                        system_instruction=MON_SCRIPT_SYSTEME, 
+                        temperature=0.2,
+                        tools=[types.Tool(google_search=types.GoogleSearch())]
                     ),
                 )
                 raw_answer = response.text or ""
                 answer = raw_answer
 
+                # Regex corrigée pour JSON imbriqué (greedy)
                 match_json = re.search(
-                    r"```json_actions\s*({.*?})\s*```", raw_answer, re.DOTALL
+                    r"```json_actions\s*(\{.*\})\s*```", raw_answer, re.DOTALL
                 )
+                if not match_json:
+                    match_json = re.search(
+                        r"```json_actions\s*({.*?})\s*```", raw_answer, re.DOTALL
+                    )
                 if match_json:
                     try:
                         actions_data = json.loads(match_json.group(1))
                         answer = re.sub(
-                            r"```json_actions\s*({.*?})\s*```", "", raw_answer, flags=re.DOTALL
+                            r"```json_actions\s*(\{.*\})\s*```", "", raw_answer, flags=re.DOTALL
                         ).strip()
+                        if not answer:
+                            answer = re.sub(
+                                r"```json_actions\s*({.*?})\s*```", "", raw_answer, flags=re.DOTALL
+                            ).strip()
 
                         fichiers = actions_data.get("fichiers_a_creer", [])
                         for f in fichiers:
                             chemin = f.get("chemin")
                             contenu = f.get("contenu")
                             if chemin and contenu:
+                                # Force hh/ si oublié
+                                if not chemin.startswith("hh/"):
+                                    if chemin.startswith("data/"):
+                                        chemin = f"hh/{chemin}"
                                 save_pcloud_file(chemin, contenu)
-                                pcloud_status = f"Taxinomie mise à jour : Fichier '{chemin}' créé dans pCloud !"
+                        if fichiers:
+                            pcloud_status = f"Taxinomie mise à jour : {len(fichiers)} fichiers créés/dissequés dans pCloud : {', '.join([ff.get('chemin','') for ff in fichiers])}"
 
                         if actions_data.get("match_detecte") is True:
                             forces = actions_data.get("forces_modeles")
                             duree = actions_data.get("duree_match", 90)
-                            # Champs supplémentaires du PROMPT COMPLET V8 (compatibles, optionnels)
-                            buts_A = actions_data.get("buts_A", [])
-                            buts_B = actions_data.get("buts_B", [])
-                            alertes = actions_data.get("alertes", [])
-                            empreinte = actions_data.get("empreinte_globale")
                             if forces:
                                 try:
-                                    # Essaie nouvelle signature si calculs_moteur la supporte
                                     graphique_url = calculs_moteur.executer_calculs_et_graphique(
-                                        forces, duree, buts_A, buts_B, alertes
+                                        forces, duree, actions_data.get("buts_A",[]), actions_data.get("buts_B",[]), actions_data.get("alertes",[])
                                     )
                                 except TypeError:
-                                    # Fallback ancienne signature - ton code actuel
                                     graphique_url = calculs_moteur.executer_calculs_et_graphique(
                                         forces, duree
                                     )
@@ -373,7 +390,6 @@ def index():
             except Exception as e:
                 answer = f"Erreur Gemini : {str(e)}"
 
-            # Sauvegarde seulement si on a une réponse
             if answer:
                 history.append({"question": user_prompt, "answer": answer})
                 save_pcloud_file(f"{TARGET_FOLDER_NAME}/memoire_ia.json", history)
