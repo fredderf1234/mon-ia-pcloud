@@ -10,10 +10,20 @@ import calculs_moteur
 
 app = Flask(__name__)
 
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY","AQ.Ab8RN6Kiwe3TC_I6irDioMPhGHi_bc7xx54_MOOpjk-GXyEImA")
-PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN", "MrbSZEXNhDUAPq6zZf8MBJkZ6Fnf0yTWqbp91VmpJhTp1bPUI1qy")
+# --- CONFIGURATION SECURISEE ---
+# Plus de clés en dur ! Elles sont dans Render > Environment
+# Render > ton service > Environment > Add variable
+# GEMINI_API_KEY = ta nouvelle clé
+# PCLOUD_TOKEN = ton nouveau token
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN")
 
-client = genai.Client(api_key=GEMINI_API_KEY)
+if not GEMINI_API_KEY:
+    print("❌ ERREUR: GEMINI_API_KEY manquante dans Render Environment")
+if not PCLOUD_TOKEN:
+    print("❌ ERREUR: PCLOUD_TOKEN manquant dans Render Environment")
+
+client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 TARGET_FOLDER_NAME = "hh"
 
 # PROMPT COMPLET V8 - VERSION RAG INTERNET FRAIS + DISSECTION
@@ -294,101 +304,101 @@ def index():
     if request.method == "POST":
         user_prompt = request.form.get("prompt", "").strip()
         if user_prompt:
-            racine_id = get_or_create_pcloud_path(PCLOUD_TOKEN, TARGET_FOLDER_NAME)
-            fichiers_existants = lister_arborescence_pcloud(
-                PCLOUD_TOKEN, racine_id, TARGET_FOLDER_NAME
-            )
-            contexte_fichiers = (
-                "Fichiers taxinomiques déjà disponibles dans pCloud :"
-                f" {json.dumps(fichiers_existants, ensure_ascii=False)}"
-            )
-
-            context_str = ""
-            for h in history[-5:]:
-                if isinstance(h, dict):
-                    context_str += (
-                        f"Question précédente : {h.get('question', '')}\n"
-                        f"Réponse précédente : {h.get('answer', '')}\n"
-                    )
-
-            # On detecte si besoin d'aller sur internet
-            mots_question = user_prompt.lower()
-            fichiers_concernes = [f for f in fichiers_existants if any(mot in f.lower() for mot in mots_question.split() if len(mot) > 3)]
-            
-            if fichiers_concernes:
-                info_base = f"Tu as déjà ces fichiers sur le sujet: {fichiers_concernes} -> utilise-les."
+            if not client:
+                answer = "ERREUR: Clés manquantes. Configure GEMINI_API_KEY et PCLOUD_TOKEN dans Render Environment."
             else:
-                info_base = f"ATTENTION: Aucun fichier sur '{user_prompt}' dans la base {fichiers_existants}. Tu DOIS aller sur internet avec google_search pour trouver des infos fraiches, puis disséquer en 3-4 fichiers."
-
-            full_prompt = (
-                f"{contexte_fichiers}\n{info_base}\n\n{context_str}\nNouvelle question de"
-                f" l'utilisateur : {user_prompt}"
-            )
-
-            try:
-                # ICI LA DIFFERENCE: on active google_search pour aller sur internet
-                response = client.models.generate_content(
-                    model="gemini-3.5-flash-lite",
-                    contents=full_prompt,
-                    config=types.GenerateContentConfig(
-                        system_instruction=MON_SCRIPT_SYSTEME, 
-                        temperature=0.2,
-                        tools=[types.Tool(google_search=types.GoogleSearch())]
-                    ),
+                racine_id = get_or_create_pcloud_path(PCLOUD_TOKEN, TARGET_FOLDER_NAME)
+                fichiers_existants = lister_arborescence_pcloud(
+                    PCLOUD_TOKEN, racine_id, TARGET_FOLDER_NAME
                 )
-                raw_answer = response.text or ""
-                answer = raw_answer
-
-                # Regex corrigée pour JSON imbriqué (greedy)
-                match_json = re.search(
-                    r"```json_actions\s*(\{.*\})\s*```", raw_answer, re.DOTALL
+                contexte_fichiers = (
+                    "Fichiers taxinomiques déjà disponibles dans pCloud :"
+                    f" {json.dumps(fichiers_existants, ensure_ascii=False)}"
                 )
-                if not match_json:
-                    match_json = re.search(
-                        r"```json_actions\s*({.*?})\s*```", raw_answer, re.DOTALL
+
+                context_str = ""
+                for h in history[-5:]:
+                    if isinstance(h, dict):
+                        context_str += (
+                            f"Question précédente : {h.get('question', '')}\n"
+                            f"Réponse précédente : {h.get('answer', '')}\n"
+                        )
+
+                mots_question = user_prompt.lower()
+                fichiers_concernes = [f for f in fichiers_existants if any(mot in f.lower() for mot in mots_question.split() if len(mot) > 3)]
+                
+                if fichiers_concernes:
+                    info_base = f"Tu as déjà ces fichiers sur le sujet: {fichiers_concernes} -> utilise-les."
+                else:
+                    info_base = f"ATTENTION: Aucun fichier sur '{user_prompt}' dans la base {fichiers_existants}. Tu DOIS aller sur internet avec google_search pour trouver des infos fraiches, puis disséquer en 3-4 fichiers."
+
+                full_prompt = (
+                    f"{contexte_fichiers}\n{info_base}\n\n{context_str}\nNouvelle question de"
+                    f" l'utilisateur : {user_prompt}"
+                )
+
+                try:
+                    # MODELE QUI A INTERNET - gemini-2.0-flash est le seul qui supporte google_search
+                    response = client.models.generate_content(
+                        model="gemini-2.0-flash",
+                        contents=full_prompt,
+                        config=types.GenerateContentConfig(
+                            system_instruction=MON_SCRIPT_SYSTEME, 
+                            temperature=0.2,
+                            tools=[types.Tool(google_search=types.GoogleSearch())]
+                        ),
                     )
-                if match_json:
-                    try:
-                        actions_data = json.loads(match_json.group(1))
-                        answer = re.sub(
-                            r"```json_actions\s*(\{.*\})\s*```", "", raw_answer, flags=re.DOTALL
-                        ).strip()
-                        if not answer:
+                    raw_answer = response.text or ""
+                    answer = raw_answer
+
+                    match_json = re.search(
+                        r"```json_actions\s*(\{.*\})\s*```", raw_answer, re.DOTALL
+                    )
+                    if not match_json:
+                        match_json = re.search(
+                            r"```json_actions\s*({.*?})\s*```", raw_answer, re.DOTALL
+                        )
+                    if match_json:
+                        try:
+                            actions_data = json.loads(match_json.group(1))
                             answer = re.sub(
-                                r"```json_actions\s*({.*?})\s*```", "", raw_answer, flags=re.DOTALL
+                                r"```json_actions\s*(\{.*\})\s*```", "", raw_answer, flags=re.DOTALL
                             ).strip()
+                            if not answer:
+                                answer = re.sub(
+                                    r"```json_actions\s*({.*?})\s*```", "", raw_answer, flags=re.DOTALL
+                                ).strip()
 
-                        fichiers = actions_data.get("fichiers_a_creer", [])
-                        for f in fichiers:
-                            chemin = f.get("chemin")
-                            contenu = f.get("contenu")
-                            if chemin and contenu:
-                                # Force hh/ si oublié
-                                if not chemin.startswith("hh/"):
-                                    if chemin.startswith("data/"):
-                                        chemin = f"hh/{chemin}"
-                                save_pcloud_file(chemin, contenu)
-                        if fichiers:
-                            pcloud_status = f"Taxinomie mise à jour : {len(fichiers)} fichiers créés/dissequés dans pCloud : {', '.join([ff.get('chemin','') for ff in fichiers])}"
+                            fichiers = actions_data.get("fichiers_a_creer", [])
+                            for f in fichiers:
+                                chemin = f.get("chemin")
+                                contenu = f.get("contenu")
+                                if chemin and contenu:
+                                    if not chemin.startswith("hh/"):
+                                        if chemin.startswith("data/"):
+                                            chemin = f"hh/{chemin}"
+                                    save_pcloud_file(chemin, contenu)
+                            if fichiers:
+                                pcloud_status = f"Taxinomie mise à jour : {len(fichiers)} fichiers créés/dissequés : {', '.join([ff.get('chemin','') for ff in fichiers])}"
 
-                        if actions_data.get("match_detecte") is True:
-                            forces = actions_data.get("forces_modeles")
-                            duree = actions_data.get("duree_match", 90)
-                            if forces:
-                                try:
-                                    graphique_url = calculs_moteur.executer_calculs_et_graphique(
-                                        forces, duree, actions_data.get("buts_A",[]), actions_data.get("buts_B",[]), actions_data.get("alertes",[])
-                                    )
-                                except TypeError:
-                                    graphique_url = calculs_moteur.executer_calculs_et_graphique(
-                                        forces, duree
-                                    )
+                            if actions_data.get("match_detecte") is True:
+                                forces = actions_data.get("forces_modeles")
+                                duree = actions_data.get("duree_match", 90)
+                                if forces:
+                                    try:
+                                        graphique_url = calculs_moteur.executer_calculs_et_graphique(
+                                            forces, duree, actions_data.get("buts_A",[]), actions_data.get("buts_B",[]), actions_data.get("alertes",[])
+                                        )
+                                    except TypeError:
+                                        graphique_url = calculs_moteur.executer_calculs_et_graphique(
+                                            forces, duree
+                                        )
 
-                    except Exception as parse_err:
-                        print(f"Erreur de parsing JSON actions agent : {parse_err}")
+                        except Exception as parse_err:
+                            print(f"Erreur de parsing JSON : {parse_err}")
 
-            except Exception as e:
-                answer = f"Erreur Gemini : {str(e)}"
+                except Exception as e:
+                    answer = f"Erreur Gemini : {str(e)}"
 
             if answer:
                 history.append({"question": user_prompt, "answer": answer})
