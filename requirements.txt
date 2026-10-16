@@ -8,3 +8,9 @@ google-genai
 requests
 webdavclient3
 Flask
+
+google-genai
+requests
+webdavclient3
+Flask
+gunicorn
