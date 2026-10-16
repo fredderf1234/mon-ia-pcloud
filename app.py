@@ -8,7 +8,7 @@ from google import genai
 app = Flask(__name__)
 
 # Vos clés configurées directement
-GEMINI_API_KEY = "AQ.Ab8RN6J6ouWeVgrruti_v5E1cWHrO14EnGc-j77euRCZiF6clA"
+GEMINI_API_KEY = "AQ.Ab8RN6JAuXv3_1ENEAKl_SQ5Ysg-QPOo5_kzeJNTzV04er5zcg"
 PCLOUD_TOKEN = "MrbSZEXNhDUAPq6zZf8MBJkZ6Fnf0yTWqbp91VmpJhTp1bPUI1qy"
 
 client = genai.Client(api_key=GEMINI_API_KEY)
