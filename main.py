@@ -1,6 +1,9 @@
 import os
+from flask import Flask, jsonify
 from google import genai
 from webdav3.client import Client
+
+app = Flask(__name__)
 
 # 1. Configuration des clients via les variables d'environnement de Render
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -18,30 +21,38 @@ options = {
 }
 pcloud_client = Client(options)
 
+@app.route("/")
+def home():
+    return "Service pCloud & Gemini en ligne !"
+
+@app.route("/run-sync", methods=["GET", "POST"])
 def process_data_with_gemini():
     # Exemple : Lire un fichier depuis pCloud
     remote_path = "/ai_memory.json"
     local_path = "temp_memory.json"
     
-    if pcloud_client.check(remote_path):
-        pcloud_client.download_sync(remote_path=remote_path, local_path=local_path)
-        with open(local_path, "r", encoding="utf-8") as f:
-            file_content = f.read()
-    else:
-        file_content = "Aucune mémoire préalable trouvée."
+    try:
+        if pcloud_client.check(remote_path):
+            pcloud_client.download_sync(remote_path=remote_path, local_path=local_path)
+            with open(local_path, "r", encoding="utf-8") as f:
+                file_content = f.read()
+        else:
+            file_content = "Aucune mémoire préalable trouvée."
+    except Exception as e:
+        file_content = fErreur lors de la lecture pCloud : {e}"
 
     # Interroger l'API Gemini
-    prompt = fVoici le contexte actuel extrait de pCloud :\n{file_content}\n\nGénère une analyse ou une mise à jour."
+    prompt = f"Voici le contexte actuel extrait de pCloud :\n{file_content}\n\nGénère une analyse ou une mise à jour."
     
     response = ai_client.models.generate_content(
         model='gemini-2.5-flash',
         contents=prompt,
     )
     
-    print("Réponse de Gemini :", response.text)
-    
-    # Sauvegarder le résultat si besoin sur pCloud
-    # ...
+    return jsonify({
+        "status": "success",
+        "gemini_response": response.text
+    })
 
 if __name__ == "__main__":
-    process_data_with_gemini()
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
