@@ -18,7 +18,7 @@ PCLOUD_HOST = os.environ.get(
     "PCLOUD_HOST", "eapi.pcloud.com"
 )
 GEMINI_MODEL = os.environ.get(
-    "GEMINI_MODEL", "gemini-2.5-flash"
+    "GEMINI_MODEL", "gemini-3.5-flash-lite"
 )
 
 
