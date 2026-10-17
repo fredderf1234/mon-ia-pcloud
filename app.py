@@ -2,6 +2,7 @@ import os
 import json
 import uuid
 import re
+import unicodedata
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -10,7 +11,6 @@ from flask import Flask, request, jsonify, render_template_string
 from google import genai
 from google.genai import types
 
-# Import optionnel de la recherche Python DuckDuckGo
 try:
     from duckduckgo_search import DDGS
     DDG_AVAILABLE = True
@@ -27,11 +27,10 @@ PCLOUD_HOST = os.environ.get("PCLOUD_HOST", "eapi.pcloud.com")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 PCLOUD_FOLDER = "/hh"
 
+# Remplace ce texte par tes vraies consignes système si tu en as une version spécifique
 SYSTEM_PROMPT_FOOTBALL = """
-Colle ton script / Master System Prompt complet ici entre les trois guillemets.
-Par exemple : tes règles d'analyse, ta taxonomie d'entités, tes piliers de pondération,
-tes critères statistiques (xG, heatmaps, forme, etc.) et la structure exacte
-dans laquelle tu veux que Gemini te réponde.
+Tu es un assistant expert en analyse footballistique, statistiques et données temps réel.
+Lorsque des données issues du Web te sont fournies, utilise-les directement pour répondre de façon exacte et cite les liens/sources fournis à la fin de ta réponse.
 """
 
 CHAT_TEMPLATE = """
@@ -208,7 +207,7 @@ CHAT_TEMPLATE = """
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Je suis ton agent connecté. Le voyant Gemini reste toujours vert, et le voyant Web s'allumera en orange si une recherche sur Internet est nécessaire pour compléter l'analyse.</div>
+            <div class="message ai-message">Bonjour ! Je suis ton agent connecté. Le voyant Gemini reste toujours vert, et le voyant Web s'allumera en orange si une recherche sur Internet est effectuée par Python.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
@@ -473,11 +472,17 @@ def search_web_python_fallback(query):
     try:
         results = []
         with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=3):
+            for r in ddgs.text(query, max_results=4):
                 results.append(f"Titre: {r.get('title')}\nExtrait: {r.get('body')}\nLien: {r.get('href')}")
         return "\n\n".join(results)
     except Exception as e:
         return f"Erreur lors de la recherche Python: {e}"
+
+
+def normaliser_texte(texte):
+    """Supprime les accents et met en minuscules pour une détection robuste."""
+    texte_sans_accents = unicodedata.normalize('NFD', texte).encode('ascii', 'ignore').decode("utf-8")
+    return texte_sans_accents.lower()
 
 
 def ask_gemini(question):
@@ -486,12 +491,18 @@ def ask_gemini(question):
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # Détection des besoins
-    mots_cles_web = ["meteo", "météo", "demain", "aujourd'hui", "score", "résultat", "cote", "cotes", "actu", "nouvelle", "blessure", "transfert", "composition"]
-    besoin_web = any(mot in question.lower() for mot in mots_cles_web)
+    question_norm = normaliser_texte(question)
 
-    mots_cles_calcul = ["monte-carlo", "simulation", "simuler", "calcul monte-carlo", "bayesien"]
-    declenche_calcul = any(mot in question.lower() for mot in mots_cles_calcul)
+    # Détection élargie et insensible aux accents
+    mots_cles_web = [
+        "meteo", "demain", "aujourd'hui", "aujourdhui", "source", "donnees", "donnee", 
+        "score", "resultat", "cote", "cotes", "actu", "nouvelle", "blessure", 
+        "transfert", "composition", "souston", "soustons", "temps", "prevision"
+    ]
+    besoin_web = any(mot in question_norm for mot in mots_cles_web)
+
+    mots_cles_calcul = ["monte-carlo", "simulation", "simuler", "bayesien"]
+    declenche_calcul = any(mot in question_norm for mot in mots_cles_calcul)
 
     calcul_context = ""
     graphique_html = ""
@@ -517,9 +528,12 @@ def ask_gemini(question):
     web_used = False
     if besoin_web:
         web_results = search_web_python_fallback(question)
-        if web_results:
-            # Instruction stricte et directive injectée pour forcer Gemini à exploiter les résultats web
-            full_system_prompt += f"\n\n[DONNÉES WEB EN TEMPS RÉEL OBLIGATOIRES]\nVoici les résultats actuels trouvés sur Internet pour répondre à la question :\n{web_results}\n[Fin des données web. Tu DOIS utiliser impérativement ces informations pour rédiger ta réponse.]\n"
+        if web_results and "Erreur" not in web_results and "indisponible" not in web_results:
+            full_system_prompt += (
+                f"\n\n[DONNÉES WEB RECHERCHÉES PAR PYTHON EN TEMPS RÉEL]\n"
+                f"{web_results}\n"
+                f"[Consigne : Réponds précisément à la question en utilisant ces données et cite les sources/liens extraits à la fin de ta réponse.]\n"
+            )
             web_used = True
 
     config = types.GenerateContentConfig(
