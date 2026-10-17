@@ -10,26 +10,29 @@ from flask import Flask, request, jsonify, render_template_string
 from google import genai
 from google.genai import types
 
+# Import optionnel de la recherche de secours pour éviter tout plantage si non installée
+try:
+    from duckduckgo_search import DDGS
+    DDG_AVAILABLE = True
+except ImportError:
+    DDG_AVAILABLE = False
+
+import calcul
+
 app = Flask(__name__)
 
-# Configuration via les variables d'environnement de Render
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN")
 PCLOUD_HOST = os.environ.get("PCLOUD_HOST", "eapi.pcloud.com")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 PCLOUD_FOLDER = "/hh"
 
-# ==============================================================================
-# ⚽ TON SCRIPT / PROMPT SYSTÈME FOOTBALLISTIQUE EST À COLLER ICI 👇
-# ==============================================================================
 SYSTEM_PROMPT_FOOTBALL = """
 Colle ton script / Master System Prompt complet ici entre les trois guillemets.
 Par exemple : tes règles d'analyse, ta taxonomie d'entités, tes piliers de pondération,
 tes critères statistiques (xG, heatmaps, forme, etc.) et la structure exacte
 dans laquelle tu veux que Gemini te réponde.
 """
-# ==============================================================================
-
 
 CHAT_TEMPLATE = """
 <!DOCTYPE html>
@@ -37,7 +40,7 @@ CHAT_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Gemini + pCloud (Agentic RAG)</title>
+    <title>Agent Gemini Football Analytics</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -82,12 +85,21 @@ CHAT_TEMPLATE = """
             background: linear-gradient(135deg, #ffffff, #cbd5e1);
             -webkit-background-clip: text; -webkit-text-fill-color: transparent;
         }
+        .header-badges { display: flex; gap: 8px; align-items: center; }
         .badge {
             background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(6, 182, 212, 0.2));
             color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);
             padding: 0.35rem 0.85rem; border-radius: 2rem;
             font-size: 0.75rem; font-weight: 600; box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
         }
+        /* Badge dynamique pour le statut de l'API */
+        .api-badge {
+            padding: 0.35rem 0.85rem; border-radius: 2rem;
+            font-size: 0.75rem; font-weight: 600; transition: all 0.3s ease;
+        }
+        .api-badge.gemini { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.3); }
+        .api-badge.fallback { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); }
+
         #chat-messages {
             flex: 1; overflow-y: auto; padding: 1.75rem;
             display: flex; flex-direction: column; gap: 1.25rem; scroll-behavior: smooth;
@@ -95,9 +107,9 @@ CHAT_TEMPLATE = """
         #chat-messages::-webkit-scrollbar { width: 6px; }
         #chat-messages::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
         .message {
-            padding: 1rem 1.3rem; border-radius: 1.2rem; max-width: 80%;
-            line-height: 1.6; word-break: break-word; white-space: pre-wrap;
-            font-size: 0.95rem; animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            padding: 1rem 1.3rem; border-radius: 1.2rem; max-width: 85%;
+            line-height: 1.6; word-break: break-word; font-size: 0.95rem;
+            animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(10px); }
@@ -107,12 +119,14 @@ CHAT_TEMPLATE = """
             background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
             color: white; align-self: flex-end; border-bottom-right-radius: 0.3rem;
             box-shadow: 0 6px 20px rgba(79, 70, 229, 0.35);
+            white-space: pre-wrap;
         }
         .ai-message {
             background: rgba(30, 41, 59, 0.8); color: #f1f5f9; align-self: flex-start;
             border-bottom-left-radius: 0.3rem; border: 1px solid rgba(255, 255, 255, 0.08);
             box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
         }
+        .ai-message img { max-width: 100%; border-radius: 10px; margin-top: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
         .loading { color: #a5b4fc; font-style: italic; display: flex; align-items: center; gap: 0.6rem; }
         .voice-panel {
             background: rgba(15, 23, 42, 0.95); border-top: 1px solid rgba(236, 72, 153, 0.4);
@@ -176,19 +190,22 @@ CHAT_TEMPLATE = """
         <header>
             <div class="header-title">
                 <div class="logo-icon">⚽</div>
-                <h1>Agent Gemini Football (RAG Actif)</h1>
+                <h1>Agent Gemini Football Analytics</h1>
             </div>
-            <div class="badge">pCloud : /hh</div>
+            <div class="header-badges">
+                <div id="api-status-badge" class="api-badge gemini">⚡ 100% Gemini natif</div>
+                <div class="badge">pCloud : /hh</div>
+            </div>
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Le micro reste actif jusqu'à ce que tu cliques sur Stop. Mon système RAG va chercher dans pCloud les archives pertinentes si tu fais référence à nos anciennes analyses.</div>
+            <div class="message ai-message">Bonjour ! Prêt pour analyser les matchs et les données. Le statut en haut à droite t'indiquera si l'agent utilise la recherche native ou le relais de secours Python.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
             <div class="voice-status">
                 <div class="rec-dot"></div>
-                <span>Micro actif (Parlez, cliquez sur Stop pour valider)...</span>
+                <span>Micro actif (Cliquez sur Stop pour valider)...</span>
             </div>
             <div class="audio-vumeter" id="vu-meter">
                 <div class="vu-bar"></div><div class="vu-bar"></div><div class="vu-bar"></div>
@@ -203,7 +220,7 @@ CHAT_TEMPLATE = """
             <form id="chat-form" onsubmit="sendMessage(event)">
                 <div class="input-wrapper">
                     <input type="text" id="user-input" placeholder="Écris ou dicte ta question..." autocomplete="off" required>
-                    <button type="button" id="mic-btn" class="mic-button" title="Activer le micro continu" onclick="startSpeechRecognition()">🎤</button>
+                    <button type="button" id="mic-btn" class="mic-button" title="Activer le micro" onclick="startSpeechRecognition()">🎤</button>
                 </div>
                 <button type="submit" id="send-btn">Envoyer</button>
             </form>
@@ -223,7 +240,7 @@ CHAT_TEMPLATE = """
             recognition = new SpeechRecognition();
             recognition.lang = 'fr-FR';
             recognition.interimResults = true;
-            recognition.continuous = true; // Mode continu : ne s'arrête pas tout seul
+            recognition.continuous = true;
 
             recognition.onresult = (event) => {
                 let interim = '';
@@ -237,11 +254,6 @@ CHAT_TEMPLATE = """
                 document.getElementById('user-input').value = (finalTranscript + interim).trim();
             };
 
-            recognition.onerror = (e) => {
-                console.error("Erreur micro:", e);
-            };
-            
-            // Si le navigateur coupe le micro tout seul pour une raison technique, on relance en douceur si le panneau est actif
             recognition.onend = () => {
                 const panel = document.getElementById('voice-panel');
                 if (panel.classList.contains('active')) {
@@ -255,16 +267,13 @@ CHAT_TEMPLATE = """
                 alert("La reconnaissance vocale n'est pas supportée par ton navigateur.");
                 return;
             }
-
             finalTranscript = document.getElementById('user-input').value + ' ';
-
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 microphoneStream = stream;
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
                 analyser = audioContext.createAnalyser();
                 analyser.fftSize = 32;
-
                 const source = audioContext.createMediaStreamSource(stream);
                 source.connect(analyser);
 
@@ -281,14 +290,12 @@ CHAT_TEMPLATE = """
             if (!analyser) return;
             const dataArray = new Uint8Array(analyser.frequencyBinCount);
             analyser.getByteFrequencyData(dataArray);
-
             const bars = document.querySelectorAll('.vu-bar');
             bars.forEach((bar, index) => {
                 const val = dataArray[index % dataArray.length] || 0;
                 const height = Math.max(6, Math.min(28, (val / 255) * 32));
                 bar.style.height = height + 'px';
             });
-
             animFrameId = requestAnimationFrame(animateVuMeter);
         }
 
@@ -297,17 +304,25 @@ CHAT_TEMPLATE = """
             if (microphoneStream) { microphoneStream.getTracks().forEach(track => track.stop()); microphoneStream = null; }
             if (audioContext) { try { audioContext.close(); } catch(e) {} audioContext = null; }
             if (animFrameId) { cancelAnimationFrame(animFrameId); }
-
             document.getElementById('voice-panel').classList.remove('active');
         }
 
-        // Action lorsqu'on clique explicitement sur le bouton Stop de la voix
         function stopSpeechRecognitionAndSend() {
             stopSpeechRecognition();
             const inputField = document.getElementById("user-input");
             if (inputField.value.trim()) {
-                // Déclenche l'envoi automatique après avoir coupé le micro
                 document.getElementById("chat-form").requestSubmit();
+            }
+        }
+
+        function updateApiBadge(mode) {
+            const badge = document.getElementById('api-status-badge');
+            if (mode === 'gemini') {
+                badge.className = 'api-badge gemini';
+                badge.textContent = '⚡ 100% Gemini natif';
+            } else {
+                badge.className = 'api-badge fallback';
+                badge.textContent = '🔄 Relais Python (Failover)';
             }
         }
 
@@ -334,7 +349,7 @@ CHAT_TEMPLATE = """
 
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "⚽ RAG Agentique pCloud & Recherche Web en cours...";
+            loadingDiv.textContent = "⚽ Analyse et recherche en cours...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -348,11 +363,16 @@ CHAT_TEMPLATE = """
                 const data = await response.json();
                 chatMessages.removeChild(loadingDiv);
 
+                // Mise à jour visuelle du badge d'API selon le mode utilisé par le serveur
+                if (data.api_mode) {
+                    updateApiBadge(data.api_mode);
+                }
+
                 const aiDiv = document.createElement("div");
                 aiDiv.className = "message ai-message";
 
                 if (data.success) {
-                    aiDiv.textContent = data.answer;
+                    aiDiv.innerHTML = data.answer;
                 } else {
                     aiDiv.textContent = "Erreur : " + (data.error || "Une erreur est survenue.");
                 }
@@ -383,21 +403,11 @@ def home():
 
 
 def agentic_rag_retrieve(question, max_files_to_scan=30):
-    """
-    Agentic RAG : Interroge intelligemment pCloud. 
-    Il extrait les mots-clés de la question, scanne les fichiers du dossier /hh, 
-    et ne récupère que les archives sémantiquement pertinentes.
-    """
     if not PCLOUD_TOKEN:
         return ""
-
     try:
         list_url = f"https://{PCLOUD_HOST}/listfolder"
-        res = requests.get(list_url, params={
-            "access_token": PCLOUD_TOKEN,
-            "path": PCLOUD_FOLDER
-        }, timeout=10)
-        
+        res = requests.get(list_url, params={"access_token": PCLOUD_TOKEN, "path": PCLOUD_FOLDER}, timeout=10)
         data = res.json()
         if data.get("result") != 0 or "metadata" not in data or "contents" not in data["metadata"]:
             return ""
@@ -405,27 +415,19 @@ def agentic_rag_retrieve(question, max_files_to_scan=30):
         json_files = [f for f in data["metadata"]["contents"] if f.get("name", "").endswith(".json")]
         json_files.sort(key=lambda x: x.get("created", ""), reverse=True)
         
-        # On extrait les mots-clés de la question (mots de plus de 3 lettres)
         keywords = [w.lower() for w in re.findall(r'\b\w+\b', question) if len(w) > 3]
-        
         relevant_memories = []
         scanned = 0
 
         for file_info in json_files:
             if scanned >= max_files_to_scan:
                 break
-            
             file_id = file_info.get("fileid")
             if not file_id:
                 continue
-
             scanned += 1
             dl_url = f"https://{PCLOUD_HOST}/getfilelink"
-            dl_res = requests.get(dl_url, params={
-                "access_token": PCLOUD_TOKEN,
-                "fileid": file_id
-            }, timeout=8).json()
-
+            dl_res = requests.get(dl_url, params={"access_token": PCLOUD_TOKEN, "fileid": file_id}, timeout=8).json()
             if dl_res.get("result") == 0 and "hosts" in dl_res and "path" in dl_res:
                 host = dl_res["hosts"][0]
                 path = dl_res["path"]
@@ -435,33 +437,37 @@ def agentic_rag_retrieve(question, max_files_to_scan=30):
                     q = entry.get("question", "")
                     a = entry.get("answer", "")
                     content_str = f"{q} {a}".lower()
-
-                    # Scoring simple de pertinence (Agentic RAG par correspondance de mots-clés)
                     score = sum(1 for kw in keywords if kw in content_str)
-                    
-                    # Si la question est générale ("rappelle-moi", "hier"), on prend les plus récents en priorité (score d'office)
                     if not keywords or score > 0 or scanned <= 3:
                         relevant_memories.append({
-                            "date": entry.get("date_utc", ""),
                             "text": f"Question: {q}\nRéponse: {a}",
                             "score": score
                         })
                 except Exception:
                     continue
 
-        # Tri par score de pertinence décroissant
         relevant_memories.sort(key=lambda x: x["score"], reverse=True)
-        top_memories = relevant_memories[:5] # On ne garde que les 5 archives les plus pertinentes pour l'IA
-
+        top_memories = relevant_memories[:5]
         if not top_memories:
             return ""
-
-        formatted_memory = "\n---\n".join([m["text"] for m in top_memories])
-        return formatted_memory
-
+        return "\n---\n".join([m["text"] for m in top_memories])
     except Exception as e:
         app.logger.warning(f"Erreur Agentic RAG pCloud : {e}")
         return ""
+
+
+def search_web_python_fallback(query):
+    """Fonction de secours Python (DuckDuckGo) si l'API Gemini 429 s'active."""
+    if not DDG_AVAILABLE:
+        return "Recherche Python indisponible (librairie manquante)."
+    try:
+        results = []
+        with DDGS() as ddgs:
+            for r in ddgs.text(query, max_results=3):
+                results.append(f"Titre: {r.get('title')}\nExtrait: {r.get('body')}\nLien: {r.get('href')}")
+        return "\n\n".join(results)
+    except Exception as e:
+        return f"Erreur lors de la recherche Python de secours: {e}"
 
 
 def ask_gemini(question):
@@ -470,36 +476,58 @@ def ask_gemini(question):
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # Récupération intelligente via l'Agentic RAG pCloud
+    # 1. Détection de calcul optionnel
+    mots_cles_calcul = ["monte-carlo", "simulation", "simuler", "calcul monte-carlo", "bayesien"]
+    declenche_calcul = any(mot in question.lower() for mot in mots_cles_calcul)
+
+    calcul_context = ""
+    graphique_html = ""
+    if declenche_calcul:
+        try:
+            eq_home = {"nom": "Équipe Domicile", "xg_marques": 1.9, "xg_concedes": 0.8, "victoires_recentes": 4, "matchs_joues": 5}
+            eq_away = {"nom": "Équipe Extérieur", "xg_marques": 1.3, "xg_concedes": 1.2}
+            stats_calcul, img_b64 = calcul.analyser_match(eq_home, eq_away)
+            calcul_context = f"\n\n=== RÉSULTATS DU MODÈLE MATHÉMATIQUE (MONTE-CARLO & BAYÉSIEN) ===\n{json.dumps(stats_calcul, ensure_ascii=False, indent=2)}\n=================================================================="
+            graphique_html = f"<br><img src='data:image/png;base64,{img_b64}' alt='Graphique Monte-Carlo'/>"
+        except Exception as e:
+            app.logger.warning(f"Erreur lors du calcul mathématique: {e}")
+
+    # 2. RAG pCloud
     rag_context = agentic_rag_retrieve(question)
     
     full_system_prompt = SYSTEM_PROMPT_FOOTBALL
     if rag_context:
         full_system_prompt += f"\n\n=== ARCHIVES PERTINENTES pCloud (AGENTIC RAG) ===\n{rag_context}\n================================================="
+    if calcul_context:
+        full_system_prompt += calcul_context
 
-    # 1. Tentative avec l'outil de recherche Web + RAG pCloud
+    api_mode = "gemini"
+
+    # 3. Tentative avec la recherche native Gemini
     try:
+        search_tool = types.Tool(google_search=types.GoogleSearch())
         config = types.GenerateContentConfig(
             system_instruction=full_system_prompt,
-            tools=[{"google_search": {}}]
+            tools=[search_tool]
         )
         response = client.models.generate_content(
             model=GEMINI_MODEL,
             contents=question,
             config=config
         )
-        
-        # Deuxième IA de vérification / validation croisée des infos
-        answer = response.text
-        if answer:
-            return answer
-
+        if response.text:
+            return response.text + graphique_html, "gemini"
     except Exception as e:
-        app.logger.warning(f"Recherche Web indisponible ({e}). Bascule en mode secours RAG local.")
+        app.logger.warning(f"Recherche native Gemini en erreur (429/Quota) : {e}. Bascule sur le relais Python DuckDuckGo.")
 
-    # 2. Secours (fallback) sans recherche Web pour éviter l'erreur 429
+    # 4. En cas d'erreur 429 : Relais Python (DuckDuckGo) + Injection dans Gemini standard
+    api_mode = "fallback"
+    web_results = search_web_python_fallback(question)
+    
+    prompt_with_web = full_system_prompt + f"\n\n=== RÉSULTATS RECHERCHE WEB PYTHON (SECOURS) ===\n{web_results}\n==============================================="
+    
     config_fallback = types.GenerateContentConfig(
-        system_instruction=full_system_prompt
+        system_instruction=prompt_with_web
     )
     response_fallback = client.models.generate_content(
         model=GEMINI_MODEL,
@@ -510,7 +538,7 @@ def ask_gemini(question):
     if not response_fallback.text:
         raise RuntimeError("Gemini n'a renvoyé aucune réponse.")
 
-    return response_fallback.text
+    return response_fallback.text + graphique_html, "fallback"
 
 
 def save_to_pcloud(question, answer):
@@ -529,21 +557,10 @@ def save_to_pcloud(question, answer):
 
     filename = f"echange_{now.strftime('%Y%m%d_%H%M%S')}_{record['id'][:8]}.json"
     url = f"https://{PCLOUD_HOST}/uploadfile"
-
-    params = {
-        "access_token": PCLOUD_TOKEN,
-        "path": PCLOUD_FOLDER,
-        "filename": filename
-    }
+    params = {"access_token": PCLOUD_TOKEN, "path": PCLOUD_FOLDER, "filename": filename}
 
     content = json.dumps(record, ensure_ascii=False, indent=2).encode("utf-8")
-    files = {
-        "file": (
-            filename,
-            BytesIO(content),
-            "application/json"
-        )
-    }
+    files = {"file": (filename, BytesIO(content), "application/json")}
 
     response = requests.post(url, params=params, files=files, timeout=30)
     response.raise_for_status()
@@ -552,19 +569,10 @@ def save_to_pcloud(question, answer):
     if result.get("result") != 0:
         create_url = f"https://{PCLOUD_HOST}/createfolderifnotexists"
         requests.get(create_url, params={"access_token": PCLOUD_TOKEN, "path": PCLOUD_FOLDER}, timeout=10)
-        
         response = requests.post(url, params=params, files=files, timeout=30)
         response.raise_for_status()
-        result = response.json()
-        
-        if result.get("result") != 0:
-            raise RuntimeError(f"Erreur pCloud : code {result.get('result')}")
 
-    return {
-        "filename": filename,
-        "path": f"{PCLOUD_FOLDER}/{filename}",
-        "date_utc": now.isoformat()
-    }
+    return {"filename": filename, "path": f"{PCLOUD_FOLDER}/{filename}", "date_utc": now.isoformat()}
 
 
 @app.route("/ask", methods=["POST"])
@@ -578,22 +586,13 @@ def ask():
     question = question.strip()
 
     try:
-        answer = ask_gemini(question)
+        answer, api_mode = ask_gemini(question)
         archive = save_to_pcloud(question, answer)
 
-        return jsonify({
-            "success": True,
-            "question": question,
-            "answer": answer,
-            "archive": archive
-        })
-
+        return jsonify({"success": True, "question": question, "answer": answer, "api_mode": api_mode, "archive": archive})
     except Exception:
         app.logger.exception("Erreur pendant le traitement")
-        return jsonify({
-            "success": False,
-            "error": "Le traitement a échoué. Vérifie les configurations de Render."
-        }), 500
+        return jsonify({"success": False, "error": "Le traitement a échoué. Vérifie les configurations de Render."}), 500
 
 
 if __name__ == "__main__":
