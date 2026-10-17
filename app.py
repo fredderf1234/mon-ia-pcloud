@@ -11,6 +11,7 @@ from flask import Flask, request, jsonify, render_template_string
 from google import genai
 from google.genai import types
 
+# Tente d'importer DuckDuckGo Search
 try:
     from duckduckgo_search import DDGS
     DDG_AVAILABLE = True
@@ -27,10 +28,9 @@ PCLOUD_HOST = os.environ.get("PCLOUD_HOST", "eapi.pcloud.com")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 PCLOUD_FOLDER = "/hh"
 
-# Remplace ce texte par tes vraies consignes système si tu en as une version spécifique
 SYSTEM_PROMPT_FOOTBALL = """
-Tu es un assistant expert en analyse footballistique, statistiques et données temps réel.
-Lorsque des données issues du Web te sont fournies, utilise-les directement pour répondre de façon exacte et cite les liens/sources fournis à la fin de ta réponse.
+Tu es un assistant expert en analyse footballistique, statistiques et météo/données en temps réel.
+Lorsque des données Web te sont fournies, utilise-les IMPÉRATIVEMENT pour répondre avec exactitude et liste systématiquement les liens/sources à la fin de ta réponse sous le titre '📌 Sources utilisées :'.
 """
 
 CHAT_TEMPLATE = """
@@ -207,7 +207,7 @@ CHAT_TEMPLATE = """
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Je suis ton agent connecté. Le voyant Gemini reste toujours vert, et le voyant Web s'allumera en orange si une recherche sur Internet est effectuée par Python.</div>
+            <div class="message ai-message">Bonjour ! Je suis ton agent connecté. Le voyant Gemini reste vert, et le voyant Web s'allume en orange dès qu'une recherche en direct sur Internet est effectuée.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
@@ -361,7 +361,7 @@ CHAT_TEMPLATE = """
 
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "⚽ Analyse et recherche en cours...";
+            loadingDiv.textContent = "⚽ Recherche et analyse en cours...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -465,22 +465,41 @@ def agentic_rag_retrieve(question, max_files_to_scan=30):
         return ""
 
 
-def search_web_python_fallback(query):
-    """Effectue la recherche Web en direct via Python (DuckDuckGo)."""
-    if not DDG_AVAILABLE:
-        return "Recherche Python indisponible (librairie manquante)."
-    try:
-        results = []
-        with DDGS() as ddgs:
-            for r in ddgs.text(query, max_results=4):
-                results.append(f"Titre: {r.get('title')}\nExtrait: {r.get('body')}\nLien: {r.get('href')}")
-        return "\n\n".join(results)
-    except Exception as e:
-        return f"Erreur lors de la recherche Python: {e}"
+def search_web_python_robust(query):
+    """Effectue une recherche Web robuste en combinant DuckDuckGo et un fallback API gratuit."""
+    results = []
+
+    # 1. Tentative DuckDuckGo
+    if DDG_AVAILABLE:
+        try:
+            with DDGS() as ddgs:
+                for r in ddgs.text(query, max_results=4):
+                    if r.get('title') and r.get('body'):
+                        results.append(f"Titre: {r.get('title')}\nExtrait: {r.get('body')}\nLien: {r.get('href')}")
+        except Exception as e:
+            app.logger.warning(f"DuckDuckGo échec: {e}")
+
+    # 2. Secours direct si DuckDuckGo échoue ou renvoie vide
+    if not results:
+        try:
+            search_url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
+            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            res = requests.get(search_url, headers=headers, timeout=5)
+            if res.status_code == 200:
+                snippets = re.findall(r'<a class="result__snippet[^>]*>(.*?)</a>', res.text, re.DOTALL)
+                titles = re.findall(r'<a class="result__url[^>]*>(.*?)</a>', res.text, re.DOTALL)
+                for i in range(min(3, len(snippets))):
+                    clean_snippet = re.sub('<[^<]+?>', '', snippets[i]).strip()
+                    clean_title = re.sub('<[^<]+?>', '', titles[i]).strip() if i < len(titles) else "Source Web"
+                    results.append(f"Titre: {clean_title}\nExtrait: {clean_snippet}\nLien: https://{clean_title}")
+        except Exception as e:
+            app.logger.warning(f"Fallback scraper échec: {e}")
+
+    return "\n\n".join(results) if results else ""
 
 
 def normaliser_texte(texte):
-    """Supprime les accents et met en minuscules pour une détection robuste."""
+    """Supprime les accents et transforme en minuscules."""
     texte_sans_accents = unicodedata.normalize('NFD', texte).encode('ascii', 'ignore').decode("utf-8")
     return texte_sans_accents.lower()
 
@@ -490,16 +509,17 @@ def ask_gemini(question):
         raise RuntimeError("La variable GEMINI_API_KEY est absente dans Render.")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-
     question_norm = normaliser_texte(question)
 
-    # Détection élargie et insensible aux accents
+    # Détection élargie des besoins d'informations Web
     mots_cles_web = [
         "meteo", "demain", "aujourd'hui", "aujourdhui", "source", "donnees", "donnee", 
         "score", "resultat", "cote", "cotes", "actu", "nouvelle", "blessure", 
-        "transfert", "composition", "souston", "soustons", "temps", "prevision"
+        "transfert", "composition", "souston", "soustons", "temps", "prevision", "s'il te plait"
     ]
-    besoin_web = any(mot in question_norm for mot in mots_cles_web)
+    
+    # Si la question contient un mot-clé OU est sous forme de demande d'info temps réel
+    besoin_web = any(mot in question_norm for mot in mots_cles_web) or len(question.split()) >= 3
 
     mots_cles_calcul = ["monte-carlo", "simulation", "simuler", "bayesien"]
     declenche_calcul = any(mot in question_norm for mot in mots_cles_calcul)
@@ -527,12 +547,12 @@ def ask_gemini(question):
 
     web_used = False
     if besoin_web:
-        web_results = search_web_python_fallback(question)
-        if web_results and "Erreur" not in web_results and "indisponible" not in web_results:
+        web_results = search_web_python_robust(question)
+        if web_results:
             full_system_prompt += (
-                f"\n\n[DONNÉES WEB RECHERCHÉES PAR PYTHON EN TEMPS RÉEL]\n"
+                f"\n\n[RÉSULTATS DE RECHERCHE WEB PYTHON EN TEMPS RÉEL]\n"
                 f"{web_results}\n"
-                f"[Consigne : Réponds précisément à la question en utilisant ces données et cite les sources/liens extraits à la fin de ta réponse.]\n"
+                f"[CONSIGNE STRICTE : Réponds de manière précise et complète à la question en exploitant exclusivement ces données réelles ci-dessus. À la fin de ta réponse, ajoute le bloc '📌 Sources utilisées :' suivi des liens extraits.]\n"
             )
             web_used = True
 
