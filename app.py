@@ -24,7 +24,7 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN")
 PCLOUD_HOST = os.environ.get("PCLOUD_HOST", "eapi.pcloud.com")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash-lite")
 PCLOUD_FOLDER = "/hh"
 
 SYSTEM_PROMPT_FOOTBALL = """
