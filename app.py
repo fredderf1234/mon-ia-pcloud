@@ -7,6 +7,7 @@ from io import BytesIO
 import requests
 from flask import Flask, request, jsonify, render_template_string
 from google import genai
+from google.genai import types
 
 app = Flask(__name__)
 
@@ -17,8 +18,19 @@ PCLOUD_HOST = os.environ.get("PCLOUD_HOST", "eapi.pcloud.com")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 PCLOUD_FOLDER = "/hh"
 
+# ==============================================================================
+# ⚽ TON SCRIPT / PROMPT SYSTÈME FOOTBALLISTIQUE EST À COLLER ICI 👇
+# ==============================================================================
+SYSTEM_PROMPT_FOOTBALL = """
+Colle ton script / Master System Prompt complet ici entre les trois guillemets.
+Par exemple : tes règles d'analyse, ta taxonomie d'entités, tes piliers de pondération,
+tes critères statistiques (xG, heatmaps, forme, etc.) et la structure exacte
+dans laquelle tu veux que Gemini te réponde.
+"""
+# ==============================================================================
 
-# Nouvelle interface ultra-colorée avec barres de son (vumètre) et bouton Stop
+
+# Interface HTML / CSS / JS moderne avec micro, vumètre audio et bouton Stop
 CHAT_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="fr">
@@ -157,7 +169,6 @@ CHAT_TEMPLATE = """
             gap: 0.6rem;
         }
 
-        /* Panneau de l'écoute micro avec Vumètre (barres de son) */
         .voice-panel {
             background: rgba(15, 23, 42, 0.95);
             border-top: 1px solid rgba(236, 72, 153, 0.4);
@@ -193,7 +204,6 @@ CHAT_TEMPLATE = """
             to { transform: scale(1.3); opacity: 1; }
         }
 
-        /* Barres de son (vumètre) */
         .audio-vumeter {
             display: flex;
             align-items: center;
@@ -306,17 +316,16 @@ CHAT_TEMPLATE = """
     <div class="chat-container-wrapper">
         <header>
             <div class="header-title">
-                <div class="logo-icon">✨</div>
-                <h1>Assistant Gemini</h1>
+                <div class="logo-icon">⚽</div>
+                <h1>Agent Gemini Football</h1>
             </div>
             <div class="badge">pCloud : /hh</div>
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Pose-moi une question par texte ou en utilisant le micro. Tes échanges seront archivés dans le dossier <strong>/hh</strong>.</div>
+            <div class="message ai-message">Bonjour ! Je suis ton agent expert en analyse footballistique. Pose-moi ta question par texte ou micro, nos échanges seront archivés dans <strong>/hh</strong>.</div>
         </div>
 
-        <!-- Panneau vocal interactif avec vumètre -->
         <div id="voice-panel" class="voice-panel">
             <div class="voice-status">
                 <div class="rec-dot"></div>
@@ -381,7 +390,6 @@ CHAT_TEMPLATE = """
             }
 
             try {
-                // Activer le flux audio du micro pour animer les barres de son (vumètre)
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 microphoneStream = stream;
                 audioContext = new (window.AudioContext || window.webkitAudioContext)();
@@ -395,7 +403,6 @@ CHAT_TEMPLATE = """
                 recognition.start();
                 animateVuMeter();
             } catch (err) {
-                // Fallback si l'accès direct aux flux audio du micro est restreint mais que la reco fonctionne
                 document.getElementById('voice-panel').classList.add('active');
                 recognition.start();
             }
@@ -450,16 +457,14 @@ CHAT_TEMPLATE = """
             inputField.disabled = true;
             sendBtn.disabled = true;
 
-            // Affichage message utilisateur
             const userDiv = document.createElement("div");
             userDiv.className = "message user-message";
             userDiv.textContent = question;
             chatMessages.appendChild(userDiv);
 
-            // Indicateur de chargement
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "✨ Gemini réfléchit et sauvegarde dans /hh...";
+            loadingDiv.textContent = "⚽ Analyse footballistique et sauvegarde dans /hh...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -512,9 +517,16 @@ def ask_gemini(question):
         raise RuntimeError("La variable GEMINI_API_KEY est absente dans Render.")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
+
+    # Transmission du prompt système footballistique à l'API Gemini
+    config = types.GenerateContentConfig(
+        system_instruction=SYSTEM_PROMPT_FOOTBALL
+    )
+
     response = client.models.generate_content(
         model=GEMINI_MODEL,
-        contents=question
+        contents=question,
+        config=config
     )
 
     answer = response.text
