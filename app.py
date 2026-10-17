@@ -323,7 +323,7 @@ CHAT_TEMPLATE = """
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Je suis ton agent expert en analyse footballistique. Pose-moi ta question par texte ou micro, nos échanges seront archivés dans <strong>/hh</strong>.</div>
+            <div class="message ai-message">Bonjour ! Je suis ton agent expert en analyse footballistique connecté au Web en direct. Pose-moi ta question par texte ou micro, nos échanges seront archivés dans <strong>/hh</strong>.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
@@ -464,7 +464,7 @@ CHAT_TEMPLATE = """
 
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "⚽ Analyse footballistique et sauvegarde dans /hh...";
+            loadingDiv.textContent = "⚽ Recherche Web en direct, analyse footballistique et sauvegarde dans /hh...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -518,9 +518,10 @@ def ask_gemini(question):
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # Transmission du prompt système footballistique à l'API Gemini
+    # Transmission du prompt système + activation de la recherche Web en temps réel (google_search)
     config = types.GenerateContentConfig(
-        system_instruction=SYSTEM_PROMPT_FOOTBALL
+        system_instruction=SYSTEM_PROMPT_FOOTBALL,
+        tools=[{"google_search": {}}]  # Active l'accès Web en temps réel
     )
 
     response = client.models.generate_content(
