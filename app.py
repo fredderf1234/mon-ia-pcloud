@@ -10,7 +10,7 @@ from flask import Flask, request, jsonify, render_template_string
 from google import genai
 from google.genai import types
 
-# Import optionnel de la recherche de secours pour éviter tout plantage si non installée
+# Import optionnel de la recherche Python DuckDuckGo
 try:
     from duckduckgo_search import DDGS
     DDG_AVAILABLE = True
@@ -24,7 +24,7 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN")
 PCLOUD_HOST = os.environ.get("PCLOUD_HOST", "eapi.pcloud.com")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 PCLOUD_FOLDER = "/hh"
 
 SYSTEM_PROMPT_FOOTBALL = """
@@ -92,12 +92,21 @@ CHAT_TEMPLATE = """
             padding: 0.35rem 0.85rem; border-radius: 2rem;
             font-size: 0.75rem; font-weight: 600; box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
         }
-        .api-badge {
+        .status-badge {
             padding: 0.35rem 0.85rem; border-radius: 2rem;
-            font-size: 0.75rem; font-weight: 600; transition: all 0.3s ease;
+            font-size: 0.75rem; font-weight: 600; transition: all 0.3s ease; opacity: 0.4;
         }
-        .api-badge.gemini { background: rgba(16, 185, 129, 0.2); color: #34d399; border: 1px solid rgba(52, 211, 153, 0.3); }
-        .api-badge.fallback { background: rgba(245, 158, 11, 0.2); color: #fbbf24; border: 1px solid rgba(251, 191, 36, 0.3); }
+        .status-badge.active-gemini {
+            background: rgba(16, 185, 129, 0.25); color: #34d399;
+            border: 1px solid rgba(52, 211, 153, 0.5); opacity: 1;
+            box-shadow: 0 0 10px rgba(52, 211, 153, 0.3);
+        }
+        .status-badge.active-web {
+            background: rgba(245, 158, 11, 0.25); color: #fbbf24;
+            border: 1px solid rgba(251, 191, 36, 0.5); opacity: 1;
+            box-shadow: 0 0 10px rgba(251, 191, 36, 0.3);
+        }
+        .status-badge.inactive { opacity: 0.3; border: 1px solid rgba(255, 255, 255, 0.1); filter: grayscale(1); }
 
         #chat-messages {
             flex: 1; overflow-y: auto; padding: 1.75rem;
@@ -192,13 +201,14 @@ CHAT_TEMPLATE = """
                 <h1>Agent Gemini Football Analytics</h1>
             </div>
             <div class="header-badges">
-                <div id="api-status-badge" class="api-badge gemini">⚡ 100% Gemini natif</div>
+                <div id="badge-gemini" class="status-badge active-gemini">🧠 Gemini IA</div>
+                <div id="badge-web" class="status-badge inactive">🌐 Web Python (Off)</div>
                 <div class="badge">pCloud : /hh</div>
             </div>
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Prêt pour analyser les matchs et les données. Le statut en haut à droite t'indiquera si l'agent utilise la recherche native ou le relais de secours Python.</div>
+            <div class="message ai-message">Bonjour ! Je suis ton agent connecté. Le voyant Gemini reste toujours vert, et le voyant Web s'allumera en orange si une recherche sur Internet est nécessaire pour compléter l'analyse.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
@@ -314,14 +324,18 @@ CHAT_TEMPLATE = """
             }
         }
 
-        function updateApiBadge(mode) {
-            const badge = document.getElementById('api-status-badge');
-            if (mode === 'gemini') {
-                badge.className = 'api-badge gemini';
-                badge.textContent = '⚡ 100% Gemini natif';
+        function updateStatusBadges(webUsed) {
+            const geminiBadge = document.getElementById('badge-gemini');
+            const webBadge = document.getElementById('badge-web');
+
+            geminiBadge.className = 'status-badge active-gemini';
+
+            if (webUsed) {
+                webBadge.className = 'status-badge active-web';
+                webBadge.textContent = '🌐 Web Python (Actif)';
             } else {
-                badge.className = 'api-badge fallback';
-                badge.textContent = '🔄 Relais Python (Failover)';
+                webBadge.className = 'status-badge inactive';
+                webBadge.textContent = '🌐 Web Python (Off)';
             }
         }
 
@@ -362,9 +376,7 @@ CHAT_TEMPLATE = """
                 const data = await response.json();
                 chatMessages.removeChild(loadingDiv);
 
-                if (data.api_mode) {
-                    updateApiBadge(data.api_mode);
-                }
+                updateStatusBadges(data.web_used);
 
                 const aiDiv = document.createElement("div");
                 aiDiv.className = "message ai-message";
@@ -455,7 +467,7 @@ def agentic_rag_retrieve(question, max_files_to_scan=30):
 
 
 def search_web_python_fallback(query):
-    """Fonction de secours Python (DuckDuckGo) si l'API Gemini 429 s'active."""
+    """Effectue la recherche Web en direct via Python (DuckDuckGo)."""
     if not DDG_AVAILABLE:
         return "Recherche Python indisponible (librairie manquante)."
     try:
@@ -465,7 +477,7 @@ def search_web_python_fallback(query):
                 results.append(f"Titre: {r.get('title')}\nExtrait: {r.get('body')}\nLien: {r.get('href')}")
         return "\n\n".join(results)
     except Exception as e:
-        return f"Erreur lors de la recherche Python de secours: {e}"
+        return f"Erreur lors de la recherche Python: {e}"
 
 
 def ask_gemini(question):
@@ -474,7 +486,10 @@ def ask_gemini(question):
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # 1. Détection de calcul optionnel
+    # Détection des besoins
+    mots_cles_web = ["meteo", "météo", "demain", "aujourd'hui", "score", "résultat", "cote", "cotes", "actu", "nouvelle", "blessure", "transfert", "composition"]
+    besoin_web = any(mot in question.lower() for mot in mots_cles_web)
+
     mots_cles_calcul = ["monte-carlo", "simulation", "simuler", "calcul monte-carlo", "bayesien"]
     declenche_calcul = any(mot in question.lower() for mot in mots_cles_calcul)
 
@@ -490,51 +505,35 @@ def ask_gemini(question):
         except Exception as e:
             app.logger.warning(f"Erreur lors du calcul mathématique: {e}")
 
-    # 2. RAG pCloud
+    # RAG pCloud
     rag_context = agentic_rag_retrieve(question)
-    
+
     full_system_prompt = SYSTEM_PROMPT_FOOTBALL
     if rag_context:
         full_system_prompt += f"\n\n=== ARCHIVES PERTINENTES pCloud (AGENTIC RAG) ===\n{rag_context}\n================================================="
     if calcul_context:
         full_system_prompt += calcul_context
 
-    # 3. Tentative avec la recherche native Gemini
-    try:
-        search_tool = types.Tool(google_search=types.GoogleSearch())
-        config = types.GenerateContentConfig(
-            system_instruction=full_system_prompt,
-            tools=[search_tool]
-        )
-        response = client.models.generate_content(
-            model=GEMINI_MODEL,
-            contents=question,
-            config=config
-        )
-        if response.text:
-            return response.text + graphique_html, "gemini"
-    except Exception as e:
-        app.logger.warning(f"Recherche native Gemini en erreur (429/Quota) : {e}. Bascule sur le relais Python DuckDuckGo.")
+    web_used = False
+    if besoin_web:
+        web_results = search_web_python_fallback(question)
+        if web_results:
+            full_system_prompt += f"\n\n=== RÉSULTATS DE RECHERCHE WEB EN DIRECT (PYTHON) ===\n{web_results}\n================================================="
+            web_used = True
 
-    # 4. En cas d'erreur 429 : Relais Python (DuckDuckGo) forcé et injecté
-    web_results = search_web_python_fallback(question)
-    app.logger.info(f"Résultats bruts DuckDuckGo récupérés : {web_results[:200]}...")
-
-    prompt_with_web = full_system_prompt + f"\n\n[INSTRUCTION URGENTE] Utilise impérativement les informations web en temps réel ci-dessous pour répondre précisément à la question de l'utilisateur :\n{web_results}\n"
-    
-    config_fallback = types.GenerateContentConfig(
-        system_instruction=prompt_with_web
+    config = types.GenerateContentConfig(
+        system_instruction=full_system_prompt
     )
-    response_fallback = client.models.generate_content(
+    response = client.models.generate_content(
         model=GEMINI_MODEL,
         contents=question,
-        config=config_fallback
+        config=config
     )
 
-    if not response_fallback.text:
+    if not response.text:
         raise RuntimeError("Gemini n'a renvoyé aucune réponse.")
 
-    return response_fallback.text + graphique_html, "fallback"
+    return response.text + graphique_html, web_used
 
 
 def save_to_pcloud(question, answer):
@@ -582,10 +581,10 @@ def ask():
     question = question.strip()
 
     try:
-        answer, api_mode = ask_gemini(question)
+        answer, web_used = ask_gemini(question)
         archive = save_to_pcloud(question, answer)
 
-        return jsonify({"success": True, "question": question, "answer": answer, "api_mode": api_mode, "archive": archive})
+        return jsonify({"success": True, "question": question, "answer": answer, "web_used": web_used, "archive": archive})
     except Exception:
         app.logger.exception("Erreur pendant le traitement")
         return jsonify({"success": False, "error": "Le traitement a échoué. Vérifie les configurations de Render."}), 500
