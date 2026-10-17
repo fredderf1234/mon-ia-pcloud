@@ -2,7 +2,6 @@ import os
 import json
 import uuid
 import re
-import unicodedata
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -11,7 +10,6 @@ from flask import Flask, request, jsonify, render_template_string
 from google import genai
 from google.genai import types
 
-# Tente d'importer DuckDuckGo Search
 try:
     from duckduckgo_search import DDGS
     DDG_AVAILABLE = True
@@ -40,208 +38,210 @@ CHAT_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Gemini Football Analytics</title>
+    <title>Agent Dashboard - Football Analytics</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
         body {
             font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
-            background: #070913;
+            background: #05070e;
             background-image: 
-                radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.25) 0px, transparent 50%),
-                radial-gradient(circle at 85% 85%, rgba(236, 72, 153, 0.2) 0px, transparent 50%),
-                radial-gradient(circle at 50% 50%, rgba(6, 182, 212, 0.2) 0px, transparent 60%);
+                radial-gradient(circle at 10% 20%, rgba(99, 102, 241, 0.15) 0px, transparent 40%),
+                radial-gradient(circle at 90% 80%, rgba(236, 72, 153, 0.15) 0px, transparent 40%);
             background-attachment: fixed;
             color: #f8fafc;
             height: 100vh;
             display: flex;
-            justify-content: center;
-            align-items: center;
+            flex-direction: column;
             padding: 15px;
+            overflow: hidden;
         }
-        .chat-container-wrapper {
-            width: 100%; max-width: 900px; height: 90vh;
+
+        /* Top Bar / Status Live */
+        .top-status-bar {
+            width: 100%; max-width: 1400px; margin: 0 auto 12px auto;
+            background: rgba(15, 23, 42, 0.85);
+            backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1rem;
+            padding: 0.75rem 1.25rem;
+            display: flex; align-items: center; justify-content: space-between;
+            box-shadow: 0 10px 30px rgba(0,0,0,0.5);
+        }
+        .status-left { display: flex; align-items: center; gap: 1rem; }
+        .agent-title { font-size: 1rem; font-weight: 700; color: #fff; display: flex; align-items: center; gap: 0.5rem; }
+        .live-activity {
+            font-size: 0.8rem; color: #38bdf8; background: rgba(56, 189, 248, 0.1);
+            padding: 0.25rem 0.75rem; border-radius: 1rem; border: 1px solid rgba(56, 189, 248, 0.2);
+            display: flex; align-items: center; gap: 6px;
+        }
+        .pulse-dot { width: 7px; height: 7px; background: #38bdf8; border-radius: 50%; animation: pulse 1.5s infinite; }
+        @keyframes pulse { 0% { transform: scale(0.9); opacity: 0.7; } 50% { transform: scale(1.3); opacity: 1; } 100% { transform: scale(0.9); opacity: 0.7; } }
+
+        /* Main Dashboard Grid Layout */
+        .dashboard-container {
+            width: 100%; max-width: 1400px; flex: 1; margin: 0 auto;
+            display: grid; grid-template-columns: 2.5fr 1.2fr; gap: 15px; overflow: hidden;
+            margin-bottom: 10px;
+        }
+
+        /* Panels */
+        .panel {
             background: rgba(15, 23, 42, 0.75);
-            backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.15);
-            border-radius: 1.75rem;
-            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 40px rgba(99, 102, 241, 0.2);
+            backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 1.25rem;
             display: flex; flex-direction: column; overflow: hidden;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
         }
-        header {
-            background: rgba(15, 23, 42, 0.85); padding: 1.25rem 1.75rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        .panel-header {
+            background: rgba(30, 41, 59, 0.5);
+            padding: 0.85rem 1.25rem;
+            font-size: 0.85rem; font-weight: 600; color: #cbd5e1;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             display: flex; align-items: center; justify-content: space-between;
         }
-        .header-title { display: flex; align-items: center; gap: 0.85rem; }
-        .logo-icon {
-            width: 38px; height: 38px; border-radius: 10px;
-            background: linear-gradient(135deg, #6366f1, #ec4899, #06b6d4);
-            display: flex; align-items: center; justify-content: center;
-            font-size: 1.2rem; box-shadow: 0 0 15px rgba(236, 72, 153, 0.4);
-        }
-        .header-title h1 {
-            margin: 0; font-size: 1.2rem; font-weight: 700;
-            background: linear-gradient(135deg, #ffffff, #cbd5e1);
-            -webkit-background-clip: text; -webkit-text-fill-color: transparent;
-        }
-        .header-badges { display: flex; gap: 8px; align-items: center; }
-        .badge {
-            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(6, 182, 212, 0.2));
-            color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3);
-            padding: 0.35rem 0.85rem; border-radius: 2rem;
-            font-size: 0.75rem; font-weight: 600; box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
-        }
-        .status-badge {
-            padding: 0.35rem 0.85rem; border-radius: 2rem;
-            font-size: 0.75rem; font-weight: 600; transition: all 0.3s ease; opacity: 0.4;
-        }
-        .status-badge.active-gemini {
-            background: rgba(16, 185, 129, 0.25); color: #34d399;
-            border: 1px solid rgba(52, 211, 153, 0.5); opacity: 1;
-            box-shadow: 0 0 10px rgba(52, 211, 153, 0.3);
-        }
-        .status-badge.active-web {
-            background: rgba(245, 158, 11, 0.25); color: #fbbf24;
-            border: 1px solid rgba(251, 191, 36, 0.5); opacity: 1;
-            box-shadow: 0 0 10px rgba(251, 191, 36, 0.3);
-        }
-        .status-badge.inactive { opacity: 0.3; border: 1px solid rgba(255, 255, 255, 0.1); filter: grayscale(1); }
 
+        /* Chat Section */
         #chat-messages {
-            flex: 1; overflow-y: auto; padding: 1.75rem;
-            display: flex; flex-direction: column; gap: 1.25rem; scroll-behavior: smooth;
+            flex: 1; overflow-y: auto; padding: 1.25rem;
+            display: flex; flex-direction: column; gap: 1rem; scroll-behavior: smooth;
         }
-        #chat-messages::-webkit-scrollbar { width: 6px; }
+        #chat-messages::-webkit-scrollbar { width: 5px; }
         #chat-messages::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.2); border-radius: 3px; }
+        
         .message {
-            padding: 1rem 1.3rem; border-radius: 1.2rem; max-width: 85%;
-            line-height: 1.6; word-break: break-word; font-size: 0.95rem;
-            animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+            padding: 0.9rem 1.1rem; border-radius: 1rem; max-width: 90%;
+            line-height: 1.5; word-break: break-word; font-size: 0.9rem;
+            animation: fadeIn 0.3s ease;
         }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
         .user-message {
-            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
-            color: white; align-self: flex-end; border-bottom-right-radius: 0.3rem;
-            box-shadow: 0 6px 20px rgba(79, 70, 229, 0.35);
-            white-space: pre-wrap;
+            background: linear-gradient(135deg, #6366f1, #4f46e5); color: white;
+            align-self: flex-end; border-bottom-right-radius: 0.2rem;
+            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3); white-space: pre-wrap;
         }
         .ai-message {
-            background: rgba(30, 41, 59, 0.8); color: #f1f5f9; align-self: flex-start;
-            border-bottom-left-radius: 0.3rem; border: 1px solid rgba(255, 255, 255, 0.08);
-            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+            background: rgba(30, 41, 59, 0.85); color: #f1f5f9; align-self: flex-start;
+            border-bottom-left-radius: 0.2rem; border: 1px solid rgba(255, 255, 255, 0.08);
         }
-        .ai-message img { max-width: 100%; border-radius: 10px; margin-top: 10px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }
-        .loading { color: #a5b4fc; font-style: italic; display: flex; align-items: center; gap: 0.6rem; }
-        .voice-panel {
-            background: rgba(15, 23, 42, 0.95); border-top: 1px solid rgba(236, 72, 153, 0.4);
-            padding: 0.9rem 1.75rem; display: none; align-items: center;
-            justify-content: space-between; gap: 1.5rem; animation: fadeIn 0.3s ease;
-            box-shadow: 0 -5px 20px rgba(236, 72, 153, 0.15);
-        }
-        .voice-panel.active { display: flex; }
-        .voice-status { display: flex; align-items: center; gap: 0.7rem; color: #f472b6; font-weight: 600; font-size: 0.85rem; }
-        .rec-dot {
-            width: 10px; height: 10px; background-color: #ef4444; border-radius: 50%;
-            box-shadow: 0 0 10px #ef4444; animation: pulse-dot 1s infinite alternate;
-        }
-        @keyframes pulse-dot {
-            from { transform: scale(0.8); opacity: 0.7; }
-            to { transform: scale(1.3); opacity: 1; }
-        }
-        .audio-vumeter { display: flex; align-items: center; gap: 4px; height: 28px; }
-        .vu-bar {
-            width: 4px; height: 6px; background: linear-gradient(180deg, #ec4899, #8b5cf6, #06b6d4);
-            border-radius: 2px; transition: height 0.08s ease;
-        }
-        .stop-btn {
-            background: linear-gradient(135deg, #ef4444, #dc2626); color: white;
-            border: none; padding: 0.45rem 1rem; border-radius: 0.75rem;
-            font-weight: 600; font-size: 0.8rem; cursor: pointer;
-            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4); transition: all 0.2s;
-        }
-        .stop-btn:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(239, 68, 68, 0.6); }
-        .input-area { background: rgba(15, 23, 42, 0.85); padding: 1.25rem 1.75rem; border-top: 1px solid rgba(255, 255, 255, 0.08); }
-        #chat-form { display: flex; gap: 0.75rem; align-items: center; }
+        .ai-message img { max-width: 100%; border-radius: 8px; margin-top: 8px; }
+        .loading { color: #a5b4fc; font-style: italic; font-size: 0.85rem; }
+
+        /* Input Area */
+        .input-area { background: rgba(15, 23, 42, 0.9); padding: 1rem 1.25rem; border-top: 1px solid rgba(255, 255, 255, 0.08); }
+        #chat-form { display: flex; gap: 0.6rem; align-items: center; }
         .input-wrapper { flex: 1; position: relative; display: flex; align-items: center; }
         input[type="text"] {
-            width: 100%; padding: 0.9rem 3.2rem 0.9rem 1.25rem; border-radius: 1rem;
+            width: 100%; padding: 0.8rem 3rem 0.8rem 1rem; border-radius: 0.85rem;
             border: 1px solid rgba(255, 255, 255, 0.15); background: rgba(30, 41, 59, 0.7);
-            color: white; font-size: 0.95rem; outline: none; transition: all 0.25s ease;
+            color: white; font-size: 0.9rem; outline: none; transition: all 0.2s;
         }
-        input[type="text"]:focus {
-            border-color: #ec4899; box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.25);
-            background: rgba(30, 41, 59, 0.9);
-        }
+        input[type="text"]:focus { border-color: #ec4899; box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.2); }
         .mic-button {
-            position: absolute; right: 10px; background: rgba(236, 72, 153, 0.15);
+            position: absolute; right: 8px; background: rgba(236, 72, 153, 0.15);
             border: 1px solid rgba(236, 72, 153, 0.3); color: #f472b6;
-            width: 35px; height: 35px; border-radius: 0.75rem; cursor: pointer;
-            display: flex; align-items: center; justify-content: center; transition: all 0.2s;
+            width: 32px; height: 32px; border-radius: 0.6rem; cursor: pointer;
+            display: flex; align-items: center; justify-content: center;
         }
-        .mic-button:hover { background: rgba(236, 72, 153, 0.3); color: #fff; transform: scale(1.05); }
         button[type="submit"] {
-            background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 50%, #6366f1 100%);
-            color: white; border: none; padding: 0.9rem 1.6rem; border-radius: 1rem;
-            font-weight: 700; font-size: 0.95rem; cursor: pointer; transition: all 0.2s ease;
-            box-shadow: 0 4px 15px rgba(6, 182, 212, 0.35);
+            background: linear-gradient(135deg, #06b6d4, #6366f1); color: white;
+            border: none; padding: 0.8rem 1.4rem; border-radius: 0.85rem;
+            font-weight: 700; font-size: 0.9rem; cursor: pointer; box-shadow: 0 4px 12px rgba(6, 182, 212, 0.3);
         }
-        button[type="submit"]:hover { transform: translateY(-1px); box-shadow: 0 6px 20px rgba(6, 182, 212, 0.5); }
-        button[type="submit"]:disabled { background: #475569; cursor: not-allowed; transform: none; box-shadow: none; opacity: 0.7; }
+        button[type="submit"]:hover { transform: translateY(-1px); }
+
+        /* Right Panel: Memory / RAG Context */
+        .memory-content {
+            flex: 1; overflow-y: auto; padding: 1rem; font-size: 0.8rem; color: #94a3b8;
+            display: flex; flex-direction: column; gap: 0.75rem;
+        }
+        .memory-item {
+            background: rgba(30, 41, 59, 0.5); padding: 0.75rem; border-radius: 0.75rem;
+            border: 1px solid rgba(255, 255, 255, 0.05); color: #cbd5e1;
+        }
+        .memory-item strong { color: #38bdf8; display: block; margin-bottom: 3px; font-size: 0.82rem; }
+
+        /* Voice panel */
+        .voice-panel {
+            background: rgba(15, 23, 42, 0.95); border-top: 1px solid rgba(236, 72, 153, 0.4);
+            padding: 0.75rem 1.25rem; display: none; align-items: center; justify-content: space-between;
+        }
+        .voice-panel.active { display: flex; }
+        .rec-dot { width: 9px; height: 9px; background: #ef4444; border-radius: 50%; animation: pulse 1s infinite alternate; }
+        .stop-btn { background: #ef4444; color: white; border: none; padding: 0.35rem 0.8rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; }
+
+        @media(max-width: 900px) {
+            .dashboard-container { grid-template-columns: 1fr; }
+            .panel-memory { display: none; }
+        }
     </style>
 </head>
 <body>
-    <div class="chat-container-wrapper">
-        <header>
-            <div class="header-title">
-                <div class="logo-icon">⚽</div>
-                <h1>Agent Gemini Football Analytics</h1>
-            </div>
-            <div class="header-badges">
-                <div id="badge-gemini" class="status-badge active-gemini">🧠 Gemini IA</div>
-                <div id="badge-web" class="status-badge active-web">🌐 Web Python (Actif)</div>
-                <div class="badge">pCloud : /hh</div>
-            </div>
-        </header>
 
-        <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Je consulte systématiquement la mémoire pCloud et Internet en direct pour chaque question.</div>
+    <!-- Top Status Bar -->
+    <div class="top-status-bar">
+        <div class="status-left">
+            <div class="agent-title">⚽ Agent Dashboard</div>
+            <div class="live-activity" id="live-activity-badge">
+                <div class="pulse-dot"></div>
+                <span id="activity-text">En attente d'une requête...</span>
+            </div>
         </div>
+        <div style="font-size: 0.75rem; color: #94a3b8;">pCloud Stockage : <strong>/hh</strong></div>
+    </div>
 
-        <div id="voice-panel" class="voice-panel">
-            <div class="voice-status">
-                <div class="rec-dot"></div>
-                <span>Micro actif (Cliquez sur Stop pour valider)...</span>
+    <!-- Main Grid Dashboard -->
+    <div class="dashboard-container">
+        
+        <!-- Colonne Gauche : Chat & Interface Principale -->
+        <div class="panel">
+            <div class="panel-header">
+                <span>💬 Discussion & Analyse en direct</span>
+                <span style="font-size: 0.75rem; color: #34d399;">● Connecté à Gemini</span>
             </div>
-            <div class="audio-vumeter" id="vu-meter">
-                <div class="vu-bar"></div><div class="vu-bar"></div><div class="vu-bar"></div>
-                <div class="vu-bar"></div><div class="vu-bar"></div><div class="vu-bar"></div>
-                <div class="vu-bar"></div><div class="vu-bar"></div><div class="vu-bar"></div>
-                <div class="vu-bar"></div>
+            
+            <div id="chat-messages">
+                <div class="message ai-message">Bonjour ! Pose ta question. Le tableau de bord analysera simultanément tes pCloud /hh et le web en direct.</div>
             </div>
-            <button type="button" class="stop-btn" onclick="stopSpeechRecognitionAndSend()">⏹️ Stop & Envoyer</button>
-        </div>
 
-        <div class="input-area">
-            <form id="chat-form" onsubmit="sendMessage(event)">
-                <div class="input-wrapper">
-                    <input type="text" id="user-input" placeholder="Écris ou dicte ta question..." autocomplete="off" required>
-                    <button type="button" id="mic-btn" class="mic-button" title="Activer le micro" onclick="startSpeechRecognition()">🎤</button>
+            <div id="voice-panel" class="voice-panel">
+                <div style="display:flex; align-items:center; gap:8px; color:#f472b6; font-size:0.85rem;">
+                    <div class="rec-dot"></div>
+                    <span>Micro actif...</span>
                 </div>
-                <button type="submit" id="send-btn">Envoyer</button>
-            </form>
+                <button type="button" class="stop-btn" onclick="stopSpeechRecognitionAndSend()">Stop & Envoyer</button>
+            </div>
+
+            <div class="input-area">
+                <form id="chat-form" onsubmit="sendMessage(event)">
+                    <div class="input-wrapper">
+                        <input type="text" id="user-input" placeholder="Écris ou dicte ta consigne..." autocomplete="off" required>
+                        <button type="button" id="mic-btn" class="mic-button" title="Micro" onclick="startSpeechRecognition()">🎤</button>
+                    </div>
+                    <button type="submit" id="send-btn">Envoyer</button>
+                </form>
+            </div>
         </div>
+
+        <!-- Colonne Droite : Mémoire pCloud RAG & Activité -->
+        <div class="panel panel-memory">
+            <div class="panel-header">
+                <span>🧠 Mémoire Agentic RAG (pCloud)</span>
+                <span style="font-size: 0.75rem; color: #38bdf8;">Context Store</span>
+            </div>
+            <div class="memory-content" id="memory-sidebar">
+                <div class="memory-item">
+                    <strong>État du système</strong>
+                    Les extraits pertinents de tes fichiers JSON pCloud s'afficheront ici lors de chaque requête.
+                </div>
+            </div>
+        </div>
+
     </div>
 
     <script>
         let recognition = null;
-        let audioContext = null;
-        let analyser = null;
-        let microphoneStream = null;
-        let animFrameId = null;
         let finalTranscript = '';
 
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -262,66 +262,29 @@ CHAT_TEMPLATE = """
                 }
                 document.getElementById('user-input').value = (finalTranscript + interim).trim();
             };
-
-            recognition.onend = () => {
-                const panel = document.getElementById('voice-panel');
-                if (panel.classList.contains('active')) {
-                    try { recognition.start(); } catch(err) {}
-                }
-            };
         }
 
-        async function startSpeechRecognition() {
-            if (!recognition) {
-                alert("La reconnaissance vocale n'est pas supportée par ton navigateur.");
-                return;
-            }
+        function startSpeechRecognition() {
+            if (!recognition) { alert("Reconnaissance vocale non supportée."); return; }
             finalTranscript = document.getElementById('user-input').value + ' ';
-            try {
-                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-                microphoneStream = stream;
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                analyser = audioContext.createAnalyser();
-                analyser.fftSize = 32;
-                const source = audioContext.createMediaStreamSource(stream);
-                source.connect(analyser);
-
-                document.getElementById('voice-panel').classList.add('active');
-                recognition.start();
-                animateVuMeter();
-            } catch (err) {
-                document.getElementById('voice-panel').classList.add('active');
-                recognition.start();
-            }
-        }
-
-        function animateVuMeter() {
-            if (!analyser) return;
-            const dataArray = new Uint8Array(analyser.frequencyBinCount);
-            analyser.getByteFrequencyData(dataArray);
-            const bars = document.querySelectorAll('.vu-bar');
-            bars.forEach((bar, index) => {
-                const val = dataArray[index % dataArray.length] || 0;
-                const height = Math.max(6, Math.min(28, (val / 255) * 32));
-                bar.style.height = height + 'px';
-            });
-            animFrameId = requestAnimationFrame(animateVuMeter);
+            document.getElementById('voice-panel').classList.add('active');
+            try { recognition.start(); } catch(e) {}
         }
 
         function stopSpeechRecognition() {
             if (recognition) { try { recognition.stop(); } catch(e) {} }
-            if (microphoneStream) { microphoneStream.getTracks().forEach(track => track.stop()); microphoneStream = null; }
-            if (audioContext) { try { audioContext.close(); } catch(e) {} audioContext = null; }
-            if (animFrameId) { cancelAnimationFrame(animFrameId); }
             document.getElementById('voice-panel').classList.remove('active');
         }
 
         function stopSpeechRecognitionAndSend() {
             stopSpeechRecognition();
-            const inputField = document.getElementById("user-input");
-            if (inputField.value.trim()) {
+            if (document.getElementById("user-input").value.trim()) {
                 document.getElementById("chat-form").requestSubmit();
             }
+        }
+
+        function updateActivity(text) {
+            document.getElementById('activity-text').textContent = text;
         }
 
         async function sendMessage(event) {
@@ -332,6 +295,7 @@ CHAT_TEMPLATE = """
             const inputField = document.getElementById("user-input");
             const sendBtn = document.getElementById("send-btn");
             const chatMessages = document.getElementById("chat-messages");
+            const memorySidebar = document.getElementById("memory-sidebar");
 
             const question = inputField.value.trim();
             if (!question) return;
@@ -345,9 +309,10 @@ CHAT_TEMPLATE = """
             userDiv.textContent = question;
             chatMessages.appendChild(userDiv);
 
+            updateActivity("Interrogation pCloud et Internet en cours...");
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "⚽ Consultation pCloud et Web en cours...";
+            loadingDiv.textContent = "⚙️ Traitement par les modules de l'agent...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -366,8 +331,15 @@ CHAT_TEMPLATE = """
 
                 if (data.success) {
                     aiDiv.innerHTML = data.answer;
+                    updateActivity("Réponse générée et archivée sur pCloud.");
+
+                    // Mise à jour du panneau latéral mémoire si du contexte a été utilisé
+                    if (data.rag_used) {
+                        memorySidebar.innerHTML = `<div class="memory-item"><strong>Contexte RAG injecté</strong>${data.rag_used.replace(/\\n/g, '<br>')}</div>` + memorySidebar.innerHTML;
+                    }
                 } else {
                     aiDiv.textContent = "Erreur : " + (data.error || "Une erreur est survenue.");
+                    updateActivity("Erreur de traitement.");
                 }
                 chatMessages.appendChild(aiDiv);
 
@@ -376,7 +348,7 @@ CHAT_TEMPLATE = """
                 const errorDiv = document.createElement("div");
                 errorDiv.className = "message ai-message";
                 errorDiv.textContent = "Erreur de communication avec le serveur.";
-                chatMessages.appendChild(errorDiv);
+                updateActivity("Erreur réseau.");
             } finally {
                 inputField.disabled = false;
                 sendBtn.disabled = false;
@@ -397,13 +369,13 @@ def home():
 
 def agentic_rag_retrieve(question, max_files_to_scan=30):
     if not PCLOUD_TOKEN:
-        return ""
+        return "", ""
     try:
         list_url = f"https://{PCLOUD_HOST}/listfolder"
         res = requests.get(list_url, params={"access_token": PCLOUD_TOKEN, "path": PCLOUD_FOLDER}, timeout=10)
         data = res.json()
         if data.get("result") != 0 or "metadata" not in data or "contents" not in data["metadata"]:
-            return ""
+            return "", ""
 
         json_files = [f for f in data["metadata"]["contents"] if f.get("name", "").endswith(".json")]
         json_files.sort(key=lambda x: x.get("created", ""), reverse=True)
@@ -442,15 +414,15 @@ def agentic_rag_retrieve(question, max_files_to_scan=30):
         relevant_memories.sort(key=lambda x: x["score"], reverse=True)
         top_memories = relevant_memories[:5]
         if not top_memories:
-            return ""
-        return "\n---\n".join([m["text"] for m in top_memories])
+            return "", ""
+        formatted_rag = "\n---\n".join([m["text"] for m in top_memories])
+        return formatted_rag, formatted_rag[:300] + "..."
     except Exception as e:
         app.logger.warning(f"Erreur Agentic RAG pCloud : {e}")
-        return ""
+        return "", ""
 
 
 def search_web_python_robust(query):
-    """Effectue systématiquement une recherche sur Internet."""
     results = []
     if DDG_AVAILABLE:
         try:
@@ -464,7 +436,7 @@ def search_web_python_robust(query):
     if not results:
         try:
             search_url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
-            headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+            headers = {"User-Agent": "Mozilla/5.0"}
             res = requests.get(search_url, headers=headers, timeout=6)
             if res.status_code == 200:
                 snippets = re.findall(r'<a class="result__snippet[^>]*>(.*?)</a>', res.text, re.DOTALL)
@@ -485,7 +457,7 @@ def ask_gemini(question):
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # 1. Calcul optionnel (Monte-Carlo / Bayésien)
+    # 1. Calcul mathématique optionnel
     mots_cles_calcul = ["monte-carlo", "simulation", "simuler", "bayesien"]
     declenche_calcul = any(mot in question.lower() for mot in mots_cles_calcul)
 
@@ -499,46 +471,37 @@ def ask_gemini(question):
             calcul_context = f"\n\n=== RÉSULTATS DU MODÈLE MATHÉMATIQUE (MONTE-CARLO & BAYÉSIEN) ===\n{json.dumps(stats_calcul, ensure_ascii=False, indent=2)}\n=================================================================="
             graphique_html = f"<br><img src='data:image/png;base64,{img_b64}' alt='Graphique Monte-Carlo'/>"
         except Exception as e:
-            app.logger.warning(f"Erreur lors du calcul mathématique: {e}")
+            app.logger.warning(f"Erreur calcul: {e}")
 
-    # 2. Interrogation systématique de la mémoire pCloud (RAG)
-    rag_context = agentic_rag_retrieve(question)
+    # 2. Récupération pCloud RAG
+    rag_context, rag_short = agentic_rag_retrieve(question)
 
-    # 3. Interrogation systématique d'Internet en direct (Python Web)
+    # 3. Recherche Internet en direct
     web_results = search_web_python_robust(question)
 
-    # 4. Construction du Master Prompt enrichi de toutes les sources
+    # 4. Construction du Master Prompt
     full_system_prompt = SYSTEM_PROMPT_FOOTBALL
-    
     if rag_context:
         full_system_prompt += f"\n\n=== 1. ARCHIVES DE LA MÉMOIRE (pCloud) ===\n{rag_context}\n=========================================="
-    
     if web_results:
-        full_system_prompt += f"\n\n=== 2. DONNÉES INTERNET EN DIRECT (Python Web) ===\n{web_results}\n==============================================="
-
+        full_system_prompt += f"\n\n=== 2. DONNÉES INTERNET EN DIRECT ===\n{web_results}\n==============================================="
     if calcul_context:
         full_system_prompt += calcul_context
 
-    full_system_prompt += "\n\n[INSTRUCTION FINALE] Synthétise ces informations, réponds précisément à la question posée, et cite toutes tes sources (pCloud et liens Web) à la fin."
+    full_system_prompt += "\n\n[INSTRUCTION FINALE] Synthétise ces informations, réponds précisément, et cite tes sources (pCloud et liens Web) à la fin."
 
-    config = types.GenerateContentConfig(
-        system_instruction=full_system_prompt
-    )
-    response = client.models.generate_content(
-        model=GEMINI_MODEL,
-        contents=question,
-        config=config
-    )
+    config = types.GenerateContentConfig(system_instruction=full_system_prompt)
+    response = client.models.generate_content(model=GEMINI_MODEL, contents=question, config=config)
 
     if not response.text:
         raise RuntimeError("Gemini n'a renvoyé aucune réponse.")
 
-    return response.text + graphique_html
+    return response.text + graphique_html, rag_short
 
 
 def save_to_pcloud(question, answer):
     if not PCLOUD_TOKEN:
-        raise RuntimeError("La variable PCLOUD_TOKEN est absente dans Render.")
+        raise RuntimeError("La variable PCLOUD_TOKEN est absente.")
 
     now = datetime.now(timezone.utc)
     record = {
@@ -567,7 +530,7 @@ def save_to_pcloud(question, answer):
         response = requests.post(url, params=params, files=files, timeout=30)
         response.raise_for_status()
 
-    return {"filename": filename, "path": f"{PCLOUD_FOLDER}/{filename}", "date_utc": now.isoformat()}
+    return {"filename": filename}
 
 
 @app.route("/ask", methods=["POST"])
@@ -581,13 +544,13 @@ def ask():
     question = question.strip()
 
     try:
-        answer = ask_gemini(question)
-        archive = save_to_pcloud(question, answer)
+        answer, rag_used = ask_gemini(question)
+        save_to_pcloud(question, answer)
 
-        return jsonify({"success": True, "question": question, "answer": answer, "archive": archive})
+        return jsonify({"success": True, "question": question, "answer": answer, "rag_used": rag_used})
     except Exception:
         app.logger.exception("Erreur pendant le traitement")
-        return jsonify({"success": False, "error": "Le traitement a échoué. Vérifie les configurations de Render."}), 500
+        return jsonify({"success": False, "error": "Le traitement a échoué."}), 500
 
 
 if __name__ == "__main__":
