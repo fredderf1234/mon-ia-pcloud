@@ -10,11 +10,12 @@ from flask import Flask, request, jsonify, render_template_string
 from google import genai
 from google.genai import types
 
+# Import de Tavily AI avec fallback optionnel
 try:
-    from duckduckgo_search import DDGS
-    DDG_AVAILABLE = True
+    from tavily import TavilyClient
+    TAVILY_AVAILABLE = True
 except ImportError:
-    DDG_AVAILABLE = False
+    TAVILY_AVAILABLE = False
 
 import calcul
 
@@ -24,11 +25,12 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN")
 PCLOUD_HOST = os.environ.get("PCLOUD_HOST", "eapi.pcloud.com")
 GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
 PCLOUD_FOLDER = "/hh"
 
 SYSTEM_PROMPT_FOOTBALL = """
 Tu es un assistant expert en analyse footballistique, statistiques, météo et données en temps réel.
-Pour chaque question, tu disposes des archives de la mémoire (Agentic RAG pCloud) et des résultats de recherche Internet en direct (Python).
+Pour chaque question, tu disposes des archives de la mémoire (Agentic RAG pCloud) et des résultats de recherche Internet en direct.
 Tu DOIS croiser ces sources, répondre avec exactitude, et lister systématiquement les liens ou sources utilisés à la fin de ta réponse sous le titre '📌 Sources utilisées :'.
 """
 
@@ -51,21 +53,14 @@ CHAT_TEMPLATE = """
             background-attachment: fixed;
             color: #f8fafc;
             height: 100vh;
-            display: flex;
-            flex-direction: column;
-            padding: 15px;
-            overflow: hidden;
+            display: flex; flex-direction: column; padding: 15px; overflow: hidden;
         }
 
-        /* Top Bar / Status Live */
         .top-status-bar {
             width: 100%; max-width: 1400px; margin: 0 auto 12px auto;
-            background: rgba(15, 23, 42, 0.85);
-            backdrop-filter: blur(15px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 1rem;
-            padding: 0.75rem 1.25rem;
-            display: flex; align-items: center; justify-content: space-between;
+            background: rgba(15, 23, 42, 0.85); backdrop-filter: blur(15px);
+            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 1rem;
+            padding: 0.75rem 1.25rem; display: flex; align-items: center; justify-content: space-between;
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
         }
         .status-left { display: flex; align-items: center; gap: 1rem; }
@@ -78,31 +73,23 @@ CHAT_TEMPLATE = """
         .pulse-dot { width: 7px; height: 7px; background: #38bdf8; border-radius: 50%; animation: pulse 1.5s infinite; }
         @keyframes pulse { 0% { transform: scale(0.9); opacity: 0.7; } 50% { transform: scale(1.3); opacity: 1; } 100% { transform: scale(0.9); opacity: 0.7; } }
 
-        /* Main Dashboard Grid Layout */
         .dashboard-container {
             width: 100%; max-width: 1400px; flex: 1; margin: 0 auto;
-            display: grid; grid-template-columns: 2.5fr 1.2fr; gap: 15px; overflow: hidden;
-            margin-bottom: 10px;
+            display: grid; grid-template-columns: 2.5fr 1.2fr; gap: 15px; overflow: hidden; margin-bottom: 10px;
         }
 
-        /* Panels */
         .panel {
-            background: rgba(15, 23, 42, 0.75);
-            backdrop-filter: blur(20px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 1.25rem;
-            display: flex; flex-direction: column; overflow: hidden;
-            box-shadow: 0 20px 40px rgba(0,0,0,0.6);
+            background: rgba(15, 23, 42, 0.75); backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 1.25rem;
+            display: flex; flex-direction: column; overflow: hidden; box-shadow: 0 20px 40px rgba(0,0,0,0.6);
         }
         .panel-header {
-            background: rgba(30, 41, 59, 0.5);
-            padding: 0.85rem 1.25rem;
+            background: rgba(30, 41, 59, 0.5); padding: 0.85rem 1.25rem;
             font-size: 0.85rem; font-weight: 600; color: #cbd5e1;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
             display: flex; align-items: center; justify-content: space-between;
         }
 
-        /* Chat Section */
         #chat-messages {
             flex: 1; overflow-y: auto; padding: 1.25rem;
             display: flex; flex-direction: column; gap: 1rem; scroll-behavior: smooth;
@@ -112,8 +99,7 @@ CHAT_TEMPLATE = """
         
         .message {
             padding: 0.9rem 1.1rem; border-radius: 1rem; max-width: 90%;
-            line-height: 1.5; word-break: break-word; font-size: 0.9rem;
-            animation: fadeIn 0.3s ease;
+            line-height: 1.5; word-break: break-word; font-size: 0.9rem; animation: fadeIn 0.3s ease;
         }
         @keyframes fadeIn { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: translateY(0); } }
         .user-message {
@@ -128,7 +114,6 @@ CHAT_TEMPLATE = """
         .ai-message img { max-width: 100%; border-radius: 8px; margin-top: 8px; }
         .loading { color: #a5b4fc; font-style: italic; font-size: 0.85rem; }
 
-        /* Input Area */
         .input-area { background: rgba(15, 23, 42, 0.9); padding: 1rem 1.25rem; border-top: 1px solid rgba(255, 255, 255, 0.08); }
         #chat-form { display: flex; gap: 0.6rem; align-items: center; }
         .input-wrapper { flex: 1; position: relative; display: flex; align-items: center; }
@@ -151,7 +136,6 @@ CHAT_TEMPLATE = """
         }
         button[type="submit"]:hover { transform: translateY(-1px); }
 
-        /* Right Panel: Memory / RAG Context */
         .memory-content {
             flex: 1; overflow-y: auto; padding: 1rem; font-size: 0.8rem; color: #94a3b8;
             display: flex; flex-direction: column; gap: 0.75rem;
@@ -162,7 +146,6 @@ CHAT_TEMPLATE = """
         }
         .memory-item strong { color: #38bdf8; display: block; margin-bottom: 3px; font-size: 0.82rem; }
 
-        /* Voice panel */
         .voice-panel {
             background: rgba(15, 23, 42, 0.95); border-top: 1px solid rgba(236, 72, 153, 0.4);
             padding: 0.75rem 1.25rem; display: none; align-items: center; justify-content: space-between;
@@ -179,7 +162,6 @@ CHAT_TEMPLATE = """
 </head>
 <body>
 
-    <!-- Top Status Bar -->
     <div class="top-status-bar">
         <div class="status-left">
             <div class="agent-title">⚽ Agent Dashboard</div>
@@ -188,13 +170,10 @@ CHAT_TEMPLATE = """
                 <span id="activity-text">En attente d'une requête...</span>
             </div>
         </div>
-        <div style="font-size: 0.75rem; color: #94a3b8;">pCloud Stockage : <strong>/hh</strong></div>
+        <div style="font-size: 0.75rem; color: #94a3b8;">Moteur Web : <strong>Tavily AI</strong> | pCloud : <strong>/hh</strong></div>
     </div>
 
-    <!-- Main Grid Dashboard -->
     <div class="dashboard-container">
-        
-        <!-- Colonne Gauche : Chat & Interface Principale -->
         <div class="panel">
             <div class="panel-header">
                 <span>💬 Discussion & Analyse en direct</span>
@@ -202,7 +181,7 @@ CHAT_TEMPLATE = """
             </div>
             
             <div id="chat-messages">
-                <div class="message ai-message">Bonjour ! Pose ta question. Le tableau de bord analysera simultanément tes pCloud /hh et le web en direct.</div>
+                <div class="message ai-message">Bonjour ! Pose ta question. Le tableau de bord analysera tes archives pCloud /hh et le web en direct via Tavily AI.</div>
             </div>
 
             <div id="voice-panel" class="voice-panel">
@@ -224,7 +203,6 @@ CHAT_TEMPLATE = """
             </div>
         </div>
 
-        <!-- Colonne Droite : Mémoire pCloud RAG & Activité -->
         <div class="panel panel-memory">
             <div class="panel-header">
                 <span>🧠 Mémoire Agentic RAG (pCloud)</span>
@@ -237,7 +215,6 @@ CHAT_TEMPLATE = """
                 </div>
             </div>
         </div>
-
     </div>
 
     <script>
@@ -309,10 +286,10 @@ CHAT_TEMPLATE = """
             userDiv.textContent = question;
             chatMessages.appendChild(userDiv);
 
-            updateActivity("Interrogation pCloud et Internet en cours...");
+            updateActivity("Recherche Tavily AI & pCloud en cours...");
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "⚙️ Traitement par les modules de l'agent...";
+            loadingDiv.textContent = "⚙️ Recherche Web Tavily AI + RAG pCloud...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -333,7 +310,6 @@ CHAT_TEMPLATE = """
                     aiDiv.innerHTML = data.answer;
                     updateActivity("Réponse générée et archivée sur pCloud.");
 
-                    // Mise à jour du panneau latéral mémoire si du contexte a été utilisé
                     if (data.rag_used) {
                         memorySidebar.innerHTML = `<div class="memory-item"><strong>Contexte RAG injecté</strong>${data.rag_used.replace(/\\n/g, '<br>')}</div>` + memorySidebar.innerHTML;
                     }
@@ -422,33 +398,46 @@ def agentic_rag_retrieve(question, max_files_to_scan=30):
         return "", ""
 
 
-def search_web_python_robust(query):
-    results = []
-    if DDG_AVAILABLE:
-        try:
-            with DDGS() as ddgs:
-                for r in ddgs.text(query, max_results=4):
-                    if r.get('title') and r.get('body'):
-                        results.append(f"Titre: {r.get('title')}\nExtrait: {r.get('body')}\nLien: {r.get('href')}")
-        except Exception as e:
-            app.logger.error(f"Erreur DuckDuckGo: {e}")
+def search_web_tavily(query):
+    """Effectue la recherche Web en direct via l'API officielle Tavily AI."""
+    if not TAVILY_API_KEY:
+        app.logger.warning("Clé TAVILY_API_KEY absente. Fallback vers recherche basique.")
+        return search_web_fallback(query)
 
-    if not results:
-        try:
-            search_url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
-            headers = {"User-Agent": "Mozilla/5.0"}
-            res = requests.get(search_url, headers=headers, timeout=6)
-            if res.status_code == 200:
-                snippets = re.findall(r'<a class="result__snippet[^>]*>(.*?)</a>', res.text, re.DOTALL)
-                titles = re.findall(r'<a class="result__url[^>]*>(.*?)</a>', res.text, re.DOTALL)
-                for i in range(min(3, len(snippets))):
-                    clean_snippet = re.sub('<[^<]+?>', '', snippets[i]).strip()
-                    clean_title = re.sub('<[^<]+?>', '', titles[i]).strip() if i < len(titles) else "Source Web"
-                    results.append(f"Titre: {clean_title}\nExtrait: {clean_snippet}\nLien: https://{clean_title}")
-        except Exception as e:
-            app.logger.error(f"Erreur Fallback HTML: {e}")
+    try:
+        if TAVILY_AVAILABLE:
+            tavily = TavilyClient(api_key=TAVILY_API_KEY)
+            response = tavily.search(query=query, search_depth="basic", max_results=4)
+            results = []
+            for item in response.get("results", []):
+                title = item.get("title", "Source Web")
+                snippet = item.get("content", "")
+                url = item.get("url", "")
+                results.append(f"Titre: {title}\nExtrait: {snippet}\nLien: {url}")
+            if results:
+                return "\n\n".join(results)
+    except Exception as e:
+        app.logger.error(f"Erreur Tavily API : {e}")
 
-    return "\n\n".join(results) if results else "Aucun résultat web trouvé en direct."
+    return search_web_fallback(query)
+
+
+def search_web_fallback(query):
+    """Fallback si Tavily n'est pas disponible."""
+    try:
+        wiki_url = f"https://fr.wikipedia.org/w/api.php?action=query&list=search&srsearch={requests.utils.quote(query)}&format=json"
+        res = requests.get(wiki_url, timeout=5).json()
+        results = []
+        if "query" in res and "search" in res["query"]:
+            for item in res["query"]["search"][:3]:
+                snippet = re.sub('<[^<]+?>', '', item.get("snippet", ""))
+                title = item.get("title", "")
+                results.append(f"Titre: {title} (Wikipédia)\nExtrait: {snippet}\nLien: https://fr.wikipedia.org/wiki/{requests.utils.quote(title)}")
+        if results:
+            return "\n\n".join(results)
+    except Exception as e:
+        app.logger.warning(f"Erreur Fallback Wikipédia: {e}")
+    return "Aucune donnée web extraite."
 
 
 def ask_gemini(question):
@@ -476,19 +465,22 @@ def ask_gemini(question):
     # 2. Récupération pCloud RAG
     rag_context, rag_short = agentic_rag_retrieve(question)
 
-    # 3. Recherche Internet en direct
-    web_results = search_web_python_robust(question)
+    # 3. Recherche Internet en direct via Tavily AI
+    web_results = search_web_tavily(question)
 
     # 4. Construction du Master Prompt
     full_system_prompt = SYSTEM_PROMPT_FOOTBALL
+    
     if rag_context:
         full_system_prompt += f"\n\n=== 1. ARCHIVES DE LA MÉMOIRE (pCloud) ===\n{rag_context}\n=========================================="
-    if web_results:
-        full_system_prompt += f"\n\n=== 2. DONNÉES INTERNET EN DIRECT ===\n{web_results}\n==============================================="
+    
+    if web_results and "Aucune donnée" not in web_results:
+        full_system_prompt += f"\n\n=== 2. DONNÉES INTERNET EN TEMPS RÉEL (TAVILY AI) ===\n{web_results}\n==============================================="
+
     if calcul_context:
         full_system_prompt += calcul_context
 
-    full_system_prompt += "\n\n[INSTRUCTION FINALE] Synthétise ces informations, réponds précisément, et cite tes sources (pCloud et liens Web) à la fin."
+    full_system_prompt += "\n\n[INSTRUCTION FINALE] Synthétise ces informations, réponds précisément à la question posée, et cite toutes tes sources (pCloud et liens Web) à la fin."
 
     config = types.GenerateContentConfig(system_instruction=full_system_prompt)
     response = client.models.generate_content(model=GEMINI_MODEL, contents=question, config=config)
