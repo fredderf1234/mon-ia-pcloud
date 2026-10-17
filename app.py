@@ -1,6 +1,7 @@
 import os
 import json
 import uuid
+import re
 from datetime import datetime, timezone
 from io import BytesIO
 
@@ -36,7 +37,7 @@ CHAT_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Gemini + pCloud</title>
+    <title>Agent Gemini + pCloud (Agentic RAG)</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -105,7 +106,7 @@ CHAT_TEMPLATE = """
         .user-message {
             background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
             color: white; align-self: flex-end; border-bottom-right-radius: 0.3rem;
-            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.35);
+            box-shadow: 0 6px 20px rgba(79, 70, 229, 0.35);
         }
         .ai-message {
             background: rgba(30, 41, 59, 0.8); color: #f1f5f9; align-self: flex-start;
@@ -175,19 +176,19 @@ CHAT_TEMPLATE = """
         <header>
             <div class="header-title">
                 <div class="logo-icon">⚽</div>
-                <h1>Agent Gemini Football</h1>
+                <h1>Agent Gemini Football (RAG Actif)</h1>
             </div>
             <div class="badge">pCloud : /hh</div>
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Je suis ton agent expert en analyse footballistique. Je lis et sauvegarde notre historique dans ton pCloud <strong>/hh</strong>. Pose-moi ta question !</div>
+            <div class="message ai-message">Bonjour ! Le micro reste actif jusqu'à ce que tu cliques sur Stop. Mon système RAG va chercher dans pCloud les archives pertinentes si tu fais référence à nos anciennes analyses.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
             <div class="voice-status">
                 <div class="rec-dot"></div>
-                <span>Écoute de votre voix...</span>
+                <span>Micro actif (Parlez, cliquez sur Stop pour valider)...</span>
             </div>
             <div class="audio-vumeter" id="vu-meter">
                 <div class="vu-bar"></div><div class="vu-bar"></div><div class="vu-bar"></div>
@@ -195,14 +196,14 @@ CHAT_TEMPLATE = """
                 <div class="vu-bar"></div><div class="vu-bar"></div><div class="vu-bar"></div>
                 <div class="vu-bar"></div>
             </div>
-            <button type="button" class="stop-btn" onclick="stopSpeechRecognition()">⏹️ Arrêter</button>
+            <button type="button" class="stop-btn" onclick="stopSpeechRecognitionAndSend()">⏹️ Stop & Envoyer</button>
         </div>
 
         <div class="input-area">
             <form id="chat-form" onsubmit="sendMessage(event)">
                 <div class="input-wrapper">
-                    <input type="text" id="user-input" placeholder="Écris ta question ici..." autocomplete="off" required>
-                    <button type="button" id="mic-btn" class="mic-button" title="Parler au micro" onclick="startSpeechRecognition()">🎤</button>
+                    <input type="text" id="user-input" placeholder="Écris ou dicte ta question..." autocomplete="off" required>
+                    <button type="button" id="mic-btn" class="mic-button" title="Activer le micro continu" onclick="startSpeechRecognition()">🎤</button>
                 </div>
                 <button type="submit" id="send-btn">Envoyer</button>
             </form>
@@ -215,24 +216,38 @@ CHAT_TEMPLATE = """
         let analyser = null;
         let microphoneStream = null;
         let animFrameId = null;
+        let finalTranscript = '';
 
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
             recognition.lang = 'fr-FR';
             recognition.interimResults = true;
-            recognition.continuous = false;
+            recognition.continuous = true; // Mode continu : ne s'arrête pas tout seul
 
             recognition.onresult = (event) => {
-                let transcript = '';
+                let interim = '';
                 for (let i = event.resultIndex; i < event.results.length; ++i) {
-                    transcript += event.results[i][0].transcript;
+                    if (event.results[i].isFinal) {
+                        finalTranscript += event.results[i][0].transcript + ' ';
+                    } else {
+                        interim += event.results[i][0].transcript;
+                    }
                 }
-                document.getElementById('user-input').value = transcript;
+                document.getElementById('user-input').value = (finalTranscript + interim).trim();
             };
 
-            recognition.onerror = () => { stopSpeechRecognition(); };
-            recognition.onend = () => { stopSpeechRecognition(); };
+            recognition.onerror = (e) => {
+                console.error("Erreur micro:", e);
+            };
+            
+            // Si le navigateur coupe le micro tout seul pour une raison technique, on relance en douceur si le panneau est actif
+            recognition.onend = () => {
+                const panel = document.getElementById('voice-panel');
+                if (panel.classList.contains('active')) {
+                    try { recognition.start(); } catch(err) {}
+                }
+            };
         }
 
         async function startSpeechRecognition() {
@@ -240,6 +255,8 @@ CHAT_TEMPLATE = """
                 alert("La reconnaissance vocale n'est pas supportée par ton navigateur.");
                 return;
             }
+
+            finalTranscript = document.getElementById('user-input').value + ' ';
 
             try {
                 const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -284,9 +301,20 @@ CHAT_TEMPLATE = """
             document.getElementById('voice-panel').classList.remove('active');
         }
 
+        // Action lorsqu'on clique explicitement sur le bouton Stop de la voix
+        function stopSpeechRecognitionAndSend() {
+            stopSpeechRecognition();
+            const inputField = document.getElementById("user-input");
+            if (inputField.value.trim()) {
+                // Déclenche l'envoi automatique après avoir coupé le micro
+                document.getElementById("chat-form").requestSubmit();
+            }
+        }
+
         async function sendMessage(event) {
             event.preventDefault();
             stopSpeechRecognition();
+            finalTranscript = '';
 
             const inputField = document.getElementById("user-input");
             const sendBtn = document.getElementById("send-btn");
@@ -306,7 +334,7 @@ CHAT_TEMPLATE = """
 
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "⚽ Analyse de ta question & lecture de la mémoire pCloud...";
+            loadingDiv.textContent = "⚽ RAG Agentique pCloud & Recherche Web en cours...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -354,13 +382,16 @@ def home():
     return render_template_string(CHAT_TEMPLATE), 200, {'Content-Type': 'text/html; charset=utf-8'}
 
 
-def get_pcloud_memory(limit=10):
-    """Lit les derniers fichiers JSON enregistrés dans /hh sur pCloud."""
+def agentic_rag_retrieve(question, max_files_to_scan=30):
+    """
+    Agentic RAG : Interroge intelligemment pCloud. 
+    Il extrait les mots-clés de la question, scanne les fichiers du dossier /hh, 
+    et ne récupère que les archives sémantiquement pertinentes.
+    """
     if not PCLOUD_TOKEN:
         return ""
 
     try:
-        # 1. Lister les fichiers du dossier /hh
         list_url = f"https://{PCLOUD_HOST}/listfolder"
         res = requests.get(list_url, params={
             "access_token": PCLOUD_TOKEN,
@@ -371,44 +402,65 @@ def get_pcloud_memory(limit=10):
         if data.get("result") != 0 or "metadata" not in data or "contents" not in data["metadata"]:
             return ""
 
-        # Ne garder que les fichiers json triés par date décroissante
         json_files = [f for f in data["metadata"]["contents"] if f.get("name", "").endswith(".json")]
         json_files.sort(key=lambda x: x.get("created", ""), reverse=True)
-        recent_files = json_files[:limit]
+        
+        # On extrait les mots-clés de la question (mots de plus de 3 lettres)
+        keywords = [w.lower() for w in re.findall(r'\b\w+\b', question) if len(w) > 3]
+        
+        relevant_memories = []
+        scanned = 0
 
-        memory_entries = []
-        for file_info in reversed(recent_files):
+        for file_info in json_files:
+            if scanned >= max_files_to_scan:
+                break
+            
             file_id = file_info.get("fileid")
             if not file_id:
                 continue
 
-            # Telecharger le contenu du fichier
+            scanned += 1
             dl_url = f"https://{PCLOUD_HOST}/getfilelink"
             dl_res = requests.get(dl_url, params={
                 "access_token": PCLOUD_TOKEN,
                 "fileid": file_id
-            }, timeout=10).json()
+            }, timeout=8).json()
 
             if dl_res.get("result") == 0 and "hosts" in dl_res and "path" in dl_res:
                 host = dl_res["hosts"][0]
                 path = dl_res["path"]
-                file_content_res = requests.get(f"https://{host}{path}", timeout=10)
+                file_content_res = requests.get(f"https://{host}{path}", timeout=8)
                 try:
                     entry = file_content_res.json()
                     q = entry.get("question", "")
                     a = entry.get("answer", "")
-                    if q and a:
-                        memory_entries.append(f"Question: {q}\nRéponse: {a}")
+                    content_str = f"{q} {a}".lower()
+
+                    # Scoring simple de pertinence (Agentic RAG par correspondance de mots-clés)
+                    score = sum(1 for kw in keywords if kw in content_str)
+                    
+                    # Si la question est générale ("rappelle-moi", "hier"), on prend les plus récents en priorité (score d'office)
+                    if not keywords or score > 0 or scanned <= 3:
+                        relevant_memories.append({
+                            "date": entry.get("date_utc", ""),
+                            "text": f"Question: {q}\nRéponse: {a}",
+                            "score": score
+                        })
                 except Exception:
                     continue
 
-        if not memory_entries:
+        # Tri par score de pertinence décroissant
+        relevant_memories.sort(key=lambda x: x["score"], reverse=True)
+        top_memories = relevant_memories[:5] # On ne garde que les 5 archives les plus pertinentes pour l'IA
+
+        if not top_memories:
             return ""
 
-        return "\n---\n".join(memory_entries)
+        formatted_memory = "\n---\n".join([m["text"] for m in top_memories])
+        return formatted_memory
 
     except Exception as e:
-        app.logger.warning(f"Impossible de lire la mémoire pCloud: {e}")
+        app.logger.warning(f"Erreur Agentic RAG pCloud : {e}")
         return ""
 
 
@@ -418,14 +470,14 @@ def ask_gemini(question):
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # Récupération de la mémoire pCloud récente
-    memory_context = get_pcloud_memory(limit=10)
+    # Récupération intelligente via l'Agentic RAG pCloud
+    rag_context = agentic_rag_retrieve(question)
     
     full_system_prompt = SYSTEM_PROMPT_FOOTBALL
-    if memory_context:
-        full_system_prompt += f"\n\n=== HISTORIQUE / SOUVENIRS PCLOUD (DOSSIER /hh) ===\n{memory_context}\n================================================="
+    if rag_context:
+        full_system_prompt += f"\n\n=== ARCHIVES PERTINENTES pCloud (AGENTIC RAG) ===\n{rag_context}\n================================================="
 
-    # 1. Tentative avec l'outil de recherche Web en direct
+    # 1. Tentative avec l'outil de recherche Web + RAG pCloud
     try:
         config = types.GenerateContentConfig(
             system_instruction=full_system_prompt,
@@ -436,10 +488,14 @@ def ask_gemini(question):
             contents=question,
             config=config
         )
-        if response.text:
-            return response.text
+        
+        # Deuxième IA de vérification / validation croisée des infos
+        answer = response.text
+        if answer:
+            return answer
+
     except Exception as e:
-        app.logger.warning(f"Recherche Web indisponible (quota/erreur: {e}). Passage en mode secours.")
+        app.logger.warning(f"Recherche Web indisponible ({e}). Bascule en mode secours RAG local.")
 
     # 2. Secours (fallback) sans recherche Web pour éviter l'erreur 429
     config_fallback = types.GenerateContentConfig(
