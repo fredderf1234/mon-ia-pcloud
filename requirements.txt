@@ -1,5 +1,11 @@
-google-genai
-requests
+
 webdavclient3
-Flask
+
 gunicorn
+flask
+requests
+google-genai
+numpy
+matplotlib
+seaborn
+scipy
