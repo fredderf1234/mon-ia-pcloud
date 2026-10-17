@@ -92,7 +92,6 @@ CHAT_TEMPLATE = """
             padding: 0.35rem 0.85rem; border-radius: 2rem;
             font-size: 0.75rem; font-weight: 600; box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
         }
-        /* Badge dynamique pour le statut de l'API */
         .api-badge {
             padding: 0.35rem 0.85rem; border-radius: 2rem;
             font-size: 0.75rem; font-weight: 600; transition: all 0.3s ease;
@@ -363,7 +362,6 @@ CHAT_TEMPLATE = """
                 const data = await response.json();
                 chatMessages.removeChild(loadingDiv);
 
-                // Mise à jour visuelle du badge d'API selon le mode utilisé par le serveur
                 if (data.api_mode) {
                     updateApiBadge(data.api_mode);
                 }
@@ -501,8 +499,6 @@ def ask_gemini(question):
     if calcul_context:
         full_system_prompt += calcul_context
 
-    api_mode = "gemini"
-
     # 3. Tentative avec la recherche native Gemini
     try:
         search_tool = types.Tool(google_search=types.GoogleSearch())
@@ -520,11 +516,11 @@ def ask_gemini(question):
     except Exception as e:
         app.logger.warning(f"Recherche native Gemini en erreur (429/Quota) : {e}. Bascule sur le relais Python DuckDuckGo.")
 
-    # 4. En cas d'erreur 429 : Relais Python (DuckDuckGo) + Injection dans Gemini standard
-    api_mode = "fallback"
+    # 4. En cas d'erreur 429 : Relais Python (DuckDuckGo) forcé et injecté
     web_results = search_web_python_fallback(question)
-    
-    prompt_with_web = full_system_prompt + f"\n\n=== RÉSULTATS RECHERCHE WEB PYTHON (SECOURS) ===\n{web_results}\n==============================================="
+    app.logger.info(f"Résultats bruts DuckDuckGo récupérés : {web_results[:200]}...")
+
+    prompt_with_web = full_system_prompt + f"\n\n[INSTRUCTION URGENTE] Utilise impérativement les informations web en temps réel ci-dessous pour répondre précisément à la question de l'utilisateur :\n{web_results}\n"
     
     config_fallback = types.GenerateContentConfig(
         system_instruction=prompt_with_web
