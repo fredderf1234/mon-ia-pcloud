@@ -29,8 +29,9 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 PCLOUD_FOLDER = "/hh"
 
 SYSTEM_PROMPT_FOOTBALL = """
-Tu es un assistant expert en analyse footballistique, statistiques et météo/données en temps réel.
-Lorsque des données Web te sont fournies, utilise-les IMPÉRATIVEMENT pour répondre avec exactitude et liste systématiquement les liens/sources à la fin de ta réponse sous le titre '📌 Sources utilisées :'.
+Tu es un assistant expert en analyse footballistique, statistiques, météo et données en temps réel.
+Pour chaque question, tu disposes des archives de la mémoire (Agentic RAG pCloud) et des résultats de recherche Internet en direct (Python).
+Tu DOIS croiser ces sources, répondre avec exactitude, et lister systématiquement les liens ou sources utilisés à la fin de ta réponse sous le titre '📌 Sources utilisées :'.
 """
 
 CHAT_TEMPLATE = """
@@ -201,13 +202,13 @@ CHAT_TEMPLATE = """
             </div>
             <div class="header-badges">
                 <div id="badge-gemini" class="status-badge active-gemini">🧠 Gemini IA</div>
-                <div id="badge-web" class="status-badge inactive">🌐 Web Python (Off)</div>
+                <div id="badge-web" class="status-badge active-web">🌐 Web Python (Actif)</div>
                 <div class="badge">pCloud : /hh</div>
             </div>
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Je suis ton agent connecté. Le voyant Gemini reste vert, et le voyant Web s'allume en orange dès qu'une recherche en direct sur Internet est effectuée.</div>
+            <div class="message ai-message">Bonjour ! Je consulte systématiquement la mémoire pCloud et Internet en direct pour chaque question.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
@@ -323,21 +324,6 @@ CHAT_TEMPLATE = """
             }
         }
 
-        function updateStatusBadges(webUsed) {
-            const geminiBadge = document.getElementById('badge-gemini');
-            const webBadge = document.getElementById('badge-web');
-
-            geminiBadge.className = 'status-badge active-gemini';
-
-            if (webUsed) {
-                webBadge.className = 'status-badge active-web';
-                webBadge.textContent = '🌐 Web Python (Actif)';
-            } else {
-                webBadge.className = 'status-badge inactive';
-                webBadge.textContent = '🌐 Web Python (Off)';
-            }
-        }
-
         async function sendMessage(event) {
             event.preventDefault();
             stopSpeechRecognition();
@@ -361,7 +347,7 @@ CHAT_TEMPLATE = """
 
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "⚽ Recherche et analyse en cours...";
+            loadingDiv.textContent = "⚽ Consultation pCloud et Web en cours...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -374,8 +360,6 @@ CHAT_TEMPLATE = """
 
                 const data = await response.json();
                 chatMessages.removeChild(loadingDiv);
-
-                updateStatusBadges(data.web_used);
 
                 const aiDiv = document.createElement("div");
                 aiDiv.className = "message ai-message";
@@ -466,10 +450,8 @@ def agentic_rag_retrieve(question, max_files_to_scan=30):
 
 
 def search_web_python_robust(query):
-    """Effectue une recherche Web robuste en combinant DuckDuckGo et un fallback API gratuit."""
+    """Effectue systématiquement une recherche sur Internet."""
     results = []
-
-    # 1. Tentative DuckDuckGo
     if DDG_AVAILABLE:
         try:
             with DDGS() as ddgs:
@@ -477,14 +459,13 @@ def search_web_python_robust(query):
                     if r.get('title') and r.get('body'):
                         results.append(f"Titre: {r.get('title')}\nExtrait: {r.get('body')}\nLien: {r.get('href')}")
         except Exception as e:
-            app.logger.warning(f"DuckDuckGo échec: {e}")
+            app.logger.error(f"Erreur DuckDuckGo: {e}")
 
-    # 2. Secours direct si DuckDuckGo échoue ou renvoie vide
     if not results:
         try:
             search_url = f"https://html.duckduckgo.com/html/?q={requests.utils.quote(query)}"
             headers = {"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
-            res = requests.get(search_url, headers=headers, timeout=5)
+            res = requests.get(search_url, headers=headers, timeout=6)
             if res.status_code == 200:
                 snippets = re.findall(r'<a class="result__snippet[^>]*>(.*?)</a>', res.text, re.DOTALL)
                 titles = re.findall(r'<a class="result__url[^>]*>(.*?)</a>', res.text, re.DOTALL)
@@ -493,15 +474,9 @@ def search_web_python_robust(query):
                     clean_title = re.sub('<[^<]+?>', '', titles[i]).strip() if i < len(titles) else "Source Web"
                     results.append(f"Titre: {clean_title}\nExtrait: {clean_snippet}\nLien: https://{clean_title}")
         except Exception as e:
-            app.logger.warning(f"Fallback scraper échec: {e}")
+            app.logger.error(f"Erreur Fallback HTML: {e}")
 
-    return "\n\n".join(results) if results else ""
-
-
-def normaliser_texte(texte):
-    """Supprime les accents et transforme en minuscules."""
-    texte_sans_accents = unicodedata.normalize('NFD', texte).encode('ascii', 'ignore').decode("utf-8")
-    return texte_sans_accents.lower()
+    return "\n\n".join(results) if results else "Aucun résultat web trouvé en direct."
 
 
 def ask_gemini(question):
@@ -509,20 +484,10 @@ def ask_gemini(question):
         raise RuntimeError("La variable GEMINI_API_KEY est absente dans Render.")
 
     client = genai.Client(api_key=GEMINI_API_KEY)
-    question_norm = normaliser_texte(question)
 
-    # Détection élargie des besoins d'informations Web
-    mots_cles_web = [
-        "meteo", "demain", "aujourd'hui", "aujourdhui", "source", "donnees", "donnee", 
-        "score", "resultat", "cote", "cotes", "actu", "nouvelle", "blessure", 
-        "transfert", "composition", "souston", "soustons", "temps", "prevision", "s'il te plait"
-    ]
-    
-    # Si la question contient un mot-clé OU est sous forme de demande d'info temps réel
-    besoin_web = any(mot in question_norm for mot in mots_cles_web) or len(question.split()) >= 3
-
+    # 1. Calcul optionnel (Monte-Carlo / Bayésien)
     mots_cles_calcul = ["monte-carlo", "simulation", "simuler", "bayesien"]
-    declenche_calcul = any(mot in question_norm for mot in mots_cles_calcul)
+    declenche_calcul = any(mot in question.lower() for mot in mots_cles_calcul)
 
     calcul_context = ""
     graphique_html = ""
@@ -536,25 +501,25 @@ def ask_gemini(question):
         except Exception as e:
             app.logger.warning(f"Erreur lors du calcul mathématique: {e}")
 
-    # RAG pCloud
+    # 2. Interrogation systématique de la mémoire pCloud (RAG)
     rag_context = agentic_rag_retrieve(question)
 
+    # 3. Interrogation systématique d'Internet en direct (Python Web)
+    web_results = search_web_python_robust(question)
+
+    # 4. Construction du Master Prompt enrichi de toutes les sources
     full_system_prompt = SYSTEM_PROMPT_FOOTBALL
+    
     if rag_context:
-        full_system_prompt += f"\n\n=== ARCHIVES PERTINENTES pCloud (AGENTIC RAG) ===\n{rag_context}\n================================================="
+        full_system_prompt += f"\n\n=== 1. ARCHIVES DE LA MÉMOIRE (pCloud) ===\n{rag_context}\n=========================================="
+    
+    if web_results:
+        full_system_prompt += f"\n\n=== 2. DONNÉES INTERNET EN DIRECT (Python Web) ===\n{web_results}\n==============================================="
+
     if calcul_context:
         full_system_prompt += calcul_context
 
-    web_used = False
-    if besoin_web:
-        web_results = search_web_python_robust(question)
-        if web_results:
-            full_system_prompt += (
-                f"\n\n[RÉSULTATS DE RECHERCHE WEB PYTHON EN TEMPS RÉEL]\n"
-                f"{web_results}\n"
-                f"[CONSIGNE STRICTE : Réponds de manière précise et complète à la question en exploitant exclusivement ces données réelles ci-dessus. À la fin de ta réponse, ajoute le bloc '📌 Sources utilisées :' suivi des liens extraits.]\n"
-            )
-            web_used = True
+    full_system_prompt += "\n\n[INSTRUCTION FINALE] Synthétise ces informations, réponds précisément à la question posée, et cite toutes tes sources (pCloud et liens Web) à la fin."
 
     config = types.GenerateContentConfig(
         system_instruction=full_system_prompt
@@ -568,7 +533,7 @@ def ask_gemini(question):
     if not response.text:
         raise RuntimeError("Gemini n'a renvoyé aucune réponse.")
 
-    return response.text + graphique_html, web_used
+    return response.text + graphique_html
 
 
 def save_to_pcloud(question, answer):
@@ -616,10 +581,10 @@ def ask():
     question = question.strip()
 
     try:
-        answer, web_used = ask_gemini(question)
+        answer = ask_gemini(question)
         archive = save_to_pcloud(question, answer)
 
-        return jsonify({"success": True, "question": question, "answer": answer, "web_used": web_used, "archive": archive})
+        return jsonify({"success": True, "question": question, "answer": answer, "archive": archive})
     except Exception:
         app.logger.exception("Erreur pendant le traitement")
         return jsonify({"success": False, "error": "Le traitement a échoué. Vérifie les configurations de Render."}), 500
