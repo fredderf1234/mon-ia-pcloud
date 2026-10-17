@@ -33,7 +33,7 @@ CHAT_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Gemini + pCloud (Analytics & RAG)</title>
+    <title>Agent Gemini Football Analytics</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -180,7 +180,7 @@ CHAT_TEMPLATE = """
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Je suis ton agent expert en analyse footballistique connecté au Web en direct, doté d'une mémoire pCloud et de modèles Monte-Carlo. Pose ta question !</div>
+            <div class="message ai-message">Bonjour ! Je suis ton agent expert connecté au Web en direct. Je lis la mémoire pCloud et déclenche les simulations Monte-Carlo uniquement si tu demandes une analyse de match.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
@@ -319,7 +319,7 @@ CHAT_TEMPLATE = """
 
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "⚽ Recherche Web en direct & analyse en cours...";
+            loadingDiv.textContent = "⚽ Recherche Web en direct & analyse...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -337,7 +337,6 @@ CHAT_TEMPLATE = """
                 aiDiv.className = "message ai-message";
 
                 if (data.success) {
-                    // Utilisation de innerHTML pour interpréter proprement les balises d'images <img> du graphique
                     aiDiv.innerHTML = data.answer;
                 } else {
                     aiDiv.textContent = "Erreur : " + (data.error || "Une erreur est survenue.");
@@ -428,8 +427,8 @@ def ask_gemini(question):
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # 1. Détection de calcul / match
-    mots_cles_calcul = ["calcul", "simulate", "simulation", "monte-carlo", "cote", "pronostic", "match", "vs", "analyser"]
+    # 1. Détection de calcul STRICTE : uniquement si l'utilisateur demande explicitement une simulation ou un modèle
+    mots_cles_calcul = ["monte-carlo", "simulation", "simuler", "calcul monte-carlo", "bayesien"]
     declenche_calcul = any(mot in question.lower() for mot in mots_cles_calcul)
 
     calcul_context = ""
@@ -454,11 +453,13 @@ def ask_gemini(question):
     if calcul_context:
         full_system_prompt += calcul_context
 
-    # 3. Appel de Gemini avec l'outil google_search activé en permanence
+    # 3. Activation correcte du composant Web Search officiel via l'objet types.Tool
+    search_tool = types.Tool(google_search=types.GoogleSearch())
+
     try:
         config = types.GenerateContentConfig(
             system_instruction=full_system_prompt,
-            tools=[{"google_search": {}}]
+            tools=[search_tool]
         )
         response = client.models.generate_content(
             model=GEMINI_MODEL,
@@ -469,9 +470,9 @@ def ask_gemini(question):
         if answer:
             return answer + graphique_html
     except Exception as e:
-        app.logger.warning(f"Recherche Web indisponible ({e}). Passage en mode secours.")
+        app.logger.warning(f"Erreur recherche web ({e}), bascule en mode standard.")
 
-    # 4. Secours sans recherche web si erreur de quota
+    # 4. Secours sans web search en cas d'erreur de quota (429)
     config_fallback = types.GenerateContentConfig(
         system_instruction=full_system_prompt
     )
