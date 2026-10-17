@@ -1,6 +1,5 @@
-
+duckduckgo_search
 webdavclient3
-
 gunicorn
 flask
 requests
