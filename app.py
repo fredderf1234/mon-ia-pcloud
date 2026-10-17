@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from io import BytesIO
 
 import requests
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, render_template_string
 from google import genai
 
 app = Flask(__name__)
@@ -14,15 +14,204 @@ app = Flask(__name__)
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 PCLOUD_TOKEN = os.environ.get("PCLOUD_TOKEN")
 PCLOUD_HOST = os.environ.get("PCLOUD_HOST", "eapi.pcloud.com")
-GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
+GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+
+# Interface HTML / CSS intégrée pour un rendu visuel moderne
+CHAT_TEMPLATE = """
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Mon Agent Gemini + pCloud</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #0f172a;
+            color: #f8fafc;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            height: 100vh;
+        }
+        header {
+            background-color: #1e293b;
+            padding: 1rem;
+            text-align: center;
+            border-bottom: 1px solid #334155;
+            font-size: 1.25rem;
+            font-weight: 600;
+        }
+        #chat-container {
+            flex: 1;
+            overflow-y: auto;
+            padding: 1.5rem;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+            max-width: 800px;
+            width: 100%;
+            margin: 0 auto;
+        }
+        .message {
+            padding: 1rem;
+            border-radius: 0.75rem;
+            max-width: 80%;
+            line-height: 1.5;
+            word-break: break-word;
+            white-space: pre-wrap;
+        }
+        .user-message {
+            background-color: #3b82f6;
+            color: white;
+            align-self: flex-end;
+            border-bottom-right-radius: 0.2rem;
+        }
+        .ai-message {
+            background-color: #1e293b;
+            color: #e2e8f0;
+            align-self: flex-start;
+            border-bottom-left-radius: 0.2rem;
+            border: 1px solid #334155;
+        }
+        .loading {
+            font-style: italic;
+            color: #94a3b8;
+        }
+        #input-container {
+            background-color: #1e293b;
+            padding: 1rem;
+            border-top: 1px solid #334155;
+            display: flex;
+            justify-content: center;
+        }
+        #input-form {
+            max-width: 800px;
+            width: 100%;
+            display: flex;
+            gap: 0.75rem;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 0.75rem 1rem;
+            border-radius: 0.5rem;
+            border: 1px solid #475569;
+            background-color: #0f172a;
+            color: white;
+            font-size: 1rem;
+            outline: none;
+        }
+        input[type="text"]:focus {
+            border-color: #3b82f6;
+        }
+        button {
+            background-color: #3b82f6;
+            color: white;
+            border: none;
+            padding: 0.75rem 1.5rem;
+            border-radius: 0.5rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: background-color 0.2s;
+        }
+        button:hover {
+            background-color: #2563eb;
+        }
+        button:disabled {
+            background-color: #475569;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <header>💬 Agent Gemini + pCloud</header>
+    
+    <div id="chat-container">
+        <div class="message ai-message">Bonjour ! Je suis ton assistant Gemini connecté à pCloud. Pose-moi une question ci-dessous, notre échange sera automatiquement archivé.</div>
+    </div>
+
+    <div id="input-container">
+        <form id="input-form" onsubmit="sendMessage(event)">
+            <input type="text" id="question-input" placeholder="Écris ta question ici..." autocomplete="off" required>
+            <button type="submit" id="send-button">Envoyer</button>
+        </form>
+    </div>
+
+    <script>
+        async function sendMessage(event) {
+            event.preventDefault();
+            const inputField = document.getElementById("question-input");
+            const sendButton = document.getElementById("send-button");
+            const chatContainer = document.getElementById("chat-container");
+            
+            const question = inputField.value.trim();
+            if (!question) return;
+
+            // Désactiver le formulaire pendant le traitement
+            inputField.value = "";
+            inputField.disabled = true;
+            sendButton.disabled = true;
+
+            // Ajouter le message de l'utilisateur dans l'interface
+            const userMsgDiv = document.createElement("div");
+            userMsgDiv.className = "message user-message";
+            userMsgDiv.textContent = question;
+            chatContainer.appendChild(userMsgDiv);
+
+            // Ajouter un indicateur de chargement
+            const loadingDiv = document.createElement("div");
+            loadingDiv.className = "message ai-message loading";
+            loadingDiv.textContent = "Gemini réfléchit et archive l'échange...";
+            chatContainer.appendChild(loadingDiv);
+            chatContainer.scrollTop = chatContainer.scrollHeight;
+
+            try {
+                const response = await fetch("/ask", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ question: question })
+                });
+
+                const data = await response.json();
+                
+                // Supprimer le message de chargement
+                chatContainer.removeChild(loadingDiv);
+
+                const aiMsgDiv = document.createElement("div");
+                aiMsgDiv.className = "message ai-message";
+
+                if (data.success) {
+                    aiMsgDiv.textContent = data.answer;
+                } else {
+                    aiMsgDiv.textContent = "Erreur : " + (data.error || "Une erreur est survenue.");
+                }
+                chatContainer.appendChild(aiMsgDiv);
+
+            } catch (error) {
+                chatContainer.removeChild(loadingDiv);
+                const errorDiv = document.createElement("div");
+                errorDiv.className = "message ai-message";
+                errorDiv.textContent = "Erreur de connexion avec le serveur Render.";
+                chatContainer.appendChild(errorDiv);
+            } finally {
+                inputField.disabled = false;
+                sendButton.disabled = false;
+                inputField.focus();
+                chatContainer.scrollTop = chatContainer.scrollHeight;
+            }
+        }
+    </script>
+</body>
+</html>
+"""
 
 
 @app.route("/", methods=["GET"])
 def home():
-    return jsonify({
-        "status": "ok",
-        "message": "Agent Gemini + pCloud opérationnel"
-    })
+    """Affiche l'interface graphique du chat."""
+    return render_template_string(CHAT_TEMPLATE), 200, {'Content-Type': 'text/html; charset=utf-8'}
 
 
 def ask_gemini(question):
