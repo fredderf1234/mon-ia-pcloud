@@ -518,7 +518,8 @@ def ask_gemini(question):
     if besoin_web:
         web_results = search_web_python_fallback(question)
         if web_results:
-            full_system_prompt += f"\n\n=== RÉSULTATS DE RECHERCHE WEB EN DIRECT (PYTHON) ===\n{web_results}\n================================================="
+            # Instruction stricte et directive injectée pour forcer Gemini à exploiter les résultats web
+            full_system_prompt += f"\n\n[DONNÉES WEB EN TEMPS RÉEL OBLIGATOIRES]\nVoici les résultats actuels trouvés sur Internet pour répondre à la question :\n{web_results}\n[Fin des données web. Tu DOIS utiliser impérativement ces informations pour rédiger ta réponse.]\n"
             web_used = True
 
     config = types.GenerateContentConfig(
