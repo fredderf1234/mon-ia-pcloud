@@ -18,7 +18,7 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 PCLOUD_FOLDER = "/hh"
 
 
-# Nouvelle interface ultra-moderne, élégante, avec bouton Micro
+# Nouvelle interface ultra-colorée avec barres de son (vumètre) et bouton Stop
 CHAT_TEMPLATE = """
 <!DOCTYPE html>
 <html lang="fr">
@@ -26,39 +26,46 @@ CHAT_TEMPLATE = """
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Agent Gemini + pCloud</title>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * {
             box-sizing: border-box;
-        }
-        body {
-            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-            background: radial-gradient(circle at top left, #1e1b4b, #0f172a);
-            color: #f8fafc;
             margin: 0;
             padding: 0;
+        }
+        body {
+            font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+            background: #070913;
+            background-image: 
+                radial-gradient(circle at 15% 15%, rgba(99, 102, 241, 0.25) 0px, transparent 50%),
+                radial-gradient(circle at 85% 85%, rgba(236, 72, 153, 0.2) 0px, transparent 50%),
+                radial-gradient(circle at 50% 50%, rgba(6, 182, 212, 0.2) 0px, transparent 60%);
+            background-attachment: fixed;
+            color: #f8fafc;
+            height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            height: 100vh;
+            padding: 15px;
         }
         .chat-container-wrapper {
             width: 100%;
-            max-width: 850px;
+            max-width: 900px;
             height: 90vh;
-            background: rgba(30, 41, 59, 0.75);
-            backdrop-filter: blur(16px);
-            -webkit-backdrop-filter: blur(16px);
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 1.5rem;
-            box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
+            background: rgba(15, 23, 42, 0.75);
+            backdrop-filter: blur(20px);
+            -webkit-backdrop-filter: blur(20px);
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            border-radius: 1.75rem;
+            box-shadow: 0 25px 60px -15px rgba(0, 0, 0, 0.7), 0 0 40px rgba(99, 102, 241, 0.2);
             display: flex;
             flex-direction: column;
             overflow: hidden;
         }
         header {
-            background: rgba(15, 23, 42, 0.6);
+            background: rgba(15, 23, 42, 0.85);
             padding: 1.25rem 1.75rem;
-            border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
             display: flex;
             align-items: center;
             justify-content: space-between;
@@ -66,22 +73,36 @@ CHAT_TEMPLATE = """
         .header-title {
             display: flex;
             align-items: center;
-            gap: 0.75rem;
+            gap: 0.85rem;
+        }
+        .logo-icon {
+            width: 38px;
+            height: 38px;
+            border-radius: 10px;
+            background: linear-gradient(135deg, #6366f1, #ec4899, #06b6d4);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.2rem;
+            box-shadow: 0 0 15px rgba(236, 72, 153, 0.4);
         }
         .header-title h1 {
             margin: 0;
             font-size: 1.2rem;
-            font-weight: 600;
-            color: #f1f5f9;
+            font-weight: 700;
+            background: linear-gradient(135deg, #ffffff, #cbd5e1);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
         .badge {
-            background-color: rgba(99, 102, 241, 0.2);
-            color: #818cf8;
-            border: 1px solid rgba(99, 102, 241, 0.3);
-            padding: 0.25rem 0.75rem;
+            background: linear-gradient(135deg, rgba(99, 102, 241, 0.2), rgba(6, 182, 212, 0.2));
+            color: #38bdf8;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            padding: 0.35rem 0.85rem;
             border-radius: 2rem;
             font-size: 0.75rem;
-            font-weight: 500;
+            font-weight: 600;
+            box-shadow: 0 0 10px rgba(6, 182, 212, 0.2);
         }
         #chat-messages {
             flex: 1;
@@ -100,43 +121,112 @@ CHAT_TEMPLATE = """
             border-radius: 3px;
         }
         .message {
-            padding: 1rem 1.25rem;
-            border-radius: 1.15rem;
-            max-width: 78%;
+            padding: 1rem 1.3rem;
+            border-radius: 1.2rem;
+            max-width: 80%;
             line-height: 1.6;
             word-break: break-word;
             white-space: pre-wrap;
             font-size: 0.95rem;
-            animation: fadeIn 0.3s ease;
+            animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
         }
         @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(8px); }
+            from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
         .user-message {
-            background: linear-gradient(135deg, #4f46e5 0%, #3730a3 100%);
+            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
             color: white;
             align-self: flex-end;
             border-bottom-right-radius: 0.3rem;
-            box-shadow: 0 4px 15px rgba(79, 70, 229, 0.3);
+            box-shadow: 0 6px 20px rgba(99, 102, 241, 0.35);
         }
         .ai-message {
-            background: rgba(15, 23, 42, 0.6);
-            color: #e2e8f0;
+            background: rgba(30, 41, 59, 0.8);
+            color: #f1f5f9;
             align-self: flex-start;
             border-bottom-left-radius: 0.3rem;
-            border: 1px solid rgba(255, 255, 255, 0.06);
-            box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
         }
         .loading {
-            color: #94a3b8;
+            color: #a5b4fc;
             font-style: italic;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
+            gap: 0.6rem;
         }
+
+        /* Panneau de l'écoute micro avec Vumètre (barres de son) */
+        .voice-panel {
+            background: rgba(15, 23, 42, 0.95);
+            border-top: 1px solid rgba(236, 72, 153, 0.4);
+            padding: 0.9rem 1.75rem;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1.5rem;
+            animation: fadeIn 0.3s ease;
+            box-shadow: 0 -5px 20px rgba(236, 72, 153, 0.15);
+        }
+        .voice-panel.active {
+            display: flex;
+        }
+        .voice-status {
+            display: flex;
+            align-items: center;
+            gap: 0.7rem;
+            color: #f472b6;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+        .rec-dot {
+            width: 10px;
+            height: 10px;
+            background-color: #ef4444;
+            border-radius: 50%;
+            box-shadow: 0 0 10px #ef4444;
+            animation: pulse-dot 1s infinite alternate;
+        }
+        @keyframes pulse-dot {
+            from { transform: scale(0.8); opacity: 0.7; }
+            to { transform: scale(1.3); opacity: 1; }
+        }
+
+        /* Barres de son (vumètre) */
+        .audio-vumeter {
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            height: 28px;
+        }
+        .vu-bar {
+            width: 4px;
+            height: 6px;
+            background: linear-gradient(180deg, #ec4899, #8b5cf6, #06b6d4);
+            border-radius: 2px;
+            transition: height 0.08s ease;
+        }
+
+        .stop-btn {
+            background: linear-gradient(135deg, #ef4444, #dc2626);
+            color: white;
+            border: none;
+            padding: 0.45rem 1rem;
+            border-radius: 0.75rem;
+            font-weight: 600;
+            font-size: 0.8rem;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+            transition: all 0.2s;
+        }
+        .stop-btn:hover {
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(239, 68, 68, 0.6);
+        }
+
         .input-area {
-            background: rgba(15, 23, 42, 0.6);
+            background: rgba(15, 23, 42, 0.85);
             padding: 1.25rem 1.75rem;
             border-top: 1px solid rgba(255, 255, 255, 0.08);
         }
@@ -153,59 +243,55 @@ CHAT_TEMPLATE = """
         }
         input[type="text"] {
             width: 100%;
-            padding: 0.85rem 3rem 0.85rem 1.25rem;
-            border-radius: 0.85rem;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            background: rgba(15, 23, 42, 0.8);
+            padding: 0.9rem 3.2rem 0.9rem 1.25rem;
+            border-radius: 1rem;
+            border: 1px solid rgba(255, 255, 255, 0.15);
+            background: rgba(30, 41, 59, 0.7);
             color: white;
             font-size: 0.95rem;
             outline: none;
             transition: all 0.25s ease;
         }
         input[type="text"]:focus {
-            border-color: #6366f1;
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.25);
+            border-color: #ec4899;
+            box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.25);
+            background: rgba(30, 41, 59, 0.9);
         }
         .mic-button {
             position: absolute;
-            right: 12px;
-            background: none;
-            border: none;
-            color: #94a3b8;
+            right: 10px;
+            background: rgba(236, 72, 153, 0.15);
+            border: 1px solid rgba(236, 72, 153, 0.3);
+            color: #f472b6;
+            width: 35px;
+            height: 35px;
+            border-radius: 0.75rem;
             cursor: pointer;
-            padding: 4px;
             display: flex;
             align-items: center;
             justify-content: center;
-            transition: color 0.2s;
+            transition: all 0.2s;
         }
         .mic-button:hover {
-            color: #f8fafc;
-        }
-        .mic-button.recording {
-            color: #ef4444;
-            animation: pulse 1.5s infinite;
-        }
-        @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.2); }
-            100% { transform: scale(1); }
+            background: rgba(236, 72, 153, 0.3);
+            color: #fff;
+            transform: scale(1.05);
         }
         button[type="submit"] {
-            background: linear-gradient(135deg, #6366f1 0%, #4f46e5 100%);
+            background: linear-gradient(135deg, #06b6d4 0%, #3b82f6 50%, #6366f1 100%);
             color: white;
             border: none;
-            padding: 0.85rem 1.5rem;
-            border-radius: 0.85rem;
-            font-weight: 600;
+            padding: 0.9rem 1.6rem;
+            border-radius: 1rem;
+            font-weight: 700;
             font-size: 0.95rem;
             cursor: pointer;
             transition: all 0.2s ease;
-            box-shadow: 0 4px 12px rgba(99, 102, 241, 0.3);
+            box-shadow: 0 4px 15px rgba(6, 182, 212, 0.35);
         }
         button[type="submit"]:hover {
-            background: linear-gradient(135deg, #4f46e5 0%, #4338ca 100%);
             transform: translateY(-1px);
+            box-shadow: 0 6px 20px rgba(6, 182, 212, 0.5);
         }
         button[type="submit"]:disabled {
             background: #475569;
@@ -220,7 +306,7 @@ CHAT_TEMPLATE = """
     <div class="chat-container-wrapper">
         <header>
             <div class="header-title">
-                <span>✨</span>
+                <div class="logo-icon">✨</div>
                 <h1>Assistant Gemini</h1>
             </div>
             <div class="badge">pCloud : /hh</div>
@@ -230,11 +316,30 @@ CHAT_TEMPLATE = """
             <div class="message ai-message">Bonjour ! Pose-moi une question par texte ou en utilisant le micro. Tes échanges seront archivés dans le dossier <strong>/hh</strong>.</div>
         </div>
 
+        <!-- Panneau vocal interactif avec vumètre -->
+        <div id="voice-panel" class="voice-panel">
+            <div class="voice-status">
+                <div class="rec-dot"></div>
+                <span>Écoute de votre voix...</span>
+            </div>
+            
+            <div class="audio-vumeter" id="vu-meter">
+                <div class="vu-bar"></div><div class="vu-bar"></div><div class="vu-bar"></div>
+                <div class="vu-bar"></div><div class="vu-bar"></div><div class="vu-bar"></div>
+                <div class="vu-bar"></div><div class="vu-bar"></div><div class="vu-bar"></div>
+                <div class="vu-bar"></div>
+            </div>
+
+            <button type="button" class="stop-btn" onclick="stopSpeechRecognition()">
+                ⏹️ Arrêter
+            </button>
+        </div>
+
         <div class="input-area">
             <form id="chat-form" onsubmit="sendMessage(event)">
                 <div class="input-wrapper">
                     <input type="text" id="user-input" placeholder="Écris ta question ici..." autocomplete="off" required>
-                    <button type="button" id="mic-btn" class="mic-button" title="Parler au micro" onclick="toggleSpeechRecognition()">
+                    <button type="button" id="mic-btn" class="mic-button" title="Parler au micro" onclick="startSpeechRecognition()">
                         🎤
                     </button>
                 </div>
@@ -244,58 +349,96 @@ CHAT_TEMPLATE = """
     </div>
 
     <script>
-        // Gestion de la reconnaissance vocale (Micro)
         let recognition = null;
-        let isRecording = false;
+        let audioContext = null;
+        let analyser = null;
+        let microphoneStream = null;
+        let animFrameId = null;
 
         if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             recognition = new SpeechRecognition();
             recognition.lang = 'fr-FR';
-            recognition.interimResults = false;
-            recognition.maxAlternatives = 1;
+            recognition.interimResults = true;
+            recognition.continuous = false;
 
             recognition.onresult = (event) => {
-                const speechResult = event.results[0][0].transcript;
-                document.getElementById('user-input').value = speechResult;
-                stopRecording();
+                let transcript = '';
+                for (let i = event.resultIndex; i < event.results.length; ++i) {
+                    transcript += event.results[i][0].transcript;
+                }
+                document.getElementById('user-input').value = transcript;
             };
 
-            recognition.onerror = () => {
-                stopRecording();
-            };
-
-            recognition.onend = () => {
-                stopRecording();
-            };
+            recognition.onerror = () => { stopSpeechRecognition(); };
+            recognition.onend = () => { stopSpeechRecognition(); };
         }
 
-        function toggleSpeechRecognition() {
+        async function startSpeechRecognition() {
             if (!recognition) {
                 alert("La reconnaissance vocale n'est pas supportée par ton navigateur.");
                 return;
             }
 
-            const micBtn = document.getElementById('mic-btn');
-            if (isRecording) {
-                recognition.stop();
-            } else {
+            try {
+                // Activer le flux audio du micro pour animer les barres de son (vumètre)
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                microphoneStream = stream;
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                analyser = audioContext.createAnalyser();
+                analyser.fftSize = 32;
+
+                const source = audioContext.createMediaStreamSource(stream);
+                source.connect(analyser);
+
+                document.getElementById('voice-panel').classList.add('active');
                 recognition.start();
-                micBtn.classList.add('recording');
-                isRecording = true;
+                animateVuMeter();
+            } catch (err) {
+                // Fallback si l'accès direct aux flux audio du micro est restreint mais que la reco fonctionne
+                document.getElementById('voice-panel').classList.add('active');
+                recognition.start();
             }
         }
 
-        function stopRecording() {
-            isRecording = false;
-            const micBtn = document.getElementById('mic-btn');
-            if (micBtn) {
-                micBtn.classList.remove('recording');
+        function animateVuMeter() {
+            if (!analyser) return;
+            const dataArray = new Uint8Array(analyser.frequencyBinCount);
+            analyser.getByteFrequencyData(dataArray);
+
+            const bars = document.querySelectorAll('.vu-bar');
+            bars.forEach((bar, index) => {
+                const val = dataArray[index % dataArray.length] || 0;
+                const height = Math.max(6, Math.min(28, (val / 255) * 32));
+                bar.style.height = height + 'px';
+            });
+
+            animFrameId = requestAnimationFrame(animateVuMeter);
+        }
+
+        function stopSpeechRecognition() {
+            if (recognition) {
+                try { recognition.stop(); } catch(e) {}
             }
+            if (microphoneStream) {
+                microphoneStream.getTracks().forEach(track => track.stop());
+                microphoneStream = null;
+            }
+            if (audioContext) {
+                try { audioContext.close(); } catch(e) {}
+                audioContext = null;
+            }
+            if (animFrameId) {
+                cancelAnimationFrame(animFrameId);
+            }
+
+            document.getElementById('voice-panel').classList.remove('active');
         }
 
         async function sendMessage(event) {
             event.preventDefault();
+            stopSpeechRecognition();
+
             const inputField = document.getElementById("user-input");
             const sendBtn = document.getElementById("send-btn");
             const chatMessages = document.getElementById("chat-messages");
@@ -316,7 +459,7 @@ CHAT_TEMPLATE = """
             // Indicateur de chargement
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "Gemini réfléchit et sauvegarde dans /hh...";
+            loadingDiv.textContent = "✨ Gemini réfléchit et sauvegarde dans /hh...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -417,13 +560,10 @@ def save_to_pcloud(question, answer):
     response.raise_for_status()
     result = response.json()
 
-    # Si le dossier /hh n'existe pas, pCloud renvoie une erreur (ex: code 2009/2004)
-    # On crée le dossier à la volée si nécessaire et on retente l'upload
     if result.get("result") != 0:
         create_url = f"https://{PCLOUD_HOST}/createfolderifnotexists"
         requests.get(create_url, params={"access_token": PCLOUD_TOKEN, "path": PCLOUD_FOLDER}, timeout=10)
         
-        # Deuxième tentative d'upload
         response = requests.post(url, params=params, files=files, timeout=30)
         response.raise_for_status()
         result = response.json()
