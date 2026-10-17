@@ -17,6 +17,7 @@ except ImportError:
     TAVILY_AVAILABLE = False
 
 import calcul
+import juge  # <-- Import de ton nouveau module Juge
 
 app = Flask(__name__)
 
@@ -29,7 +30,9 @@ PCLOUD_FOLDER = "/hh"
 
 SYSTEM_PROMPT_FOOTBALL = """
 Tu es un assistant expert en analyse footballistique, statistiques, météo et données en temps réel.
-Pour chaque question, tu disposes des archives de la mémoire (Agentic RAG pCloud) et des résultats de recherche Internet en direct.
+RÈGLE ABSOLUE DE PRIORITÉ : 
+1. Les DONNÉES INTERNET EN DIRECT priment sur tout le reste.
+2. Ne confonds jamais un match passé avec un match à venir. Vérifie bien que la date du match est strictement future par rapport à aujourd'hui (octobre 2026).
 Tu DOIS croiser ces sources, répondre avec exactitude, et lister systématiquement les liens ou sources utilisés à la fin de ta réponse sous le titre '📌 Sources utilisées :'.
 """
 
@@ -68,7 +71,6 @@ CHAT_TEMPLATE = """
         }
         header h1 { font-size: 1.1rem; font-weight: 600; color: #fff; }
         
-        /* Voyants d'activité */
         .status-indicators {
             display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
         }
@@ -94,7 +96,6 @@ CHAT_TEMPLATE = """
         .ai-message img { max-width: 100%; border-radius: 8px; margin-top: 8px; }
         .loading { color: #9ca3af; font-style: italic; font-size: 0.9rem; }
 
-        /* Panel Micro / Vocal */
         .voice-panel {
             background: #1f2937; border-top: 1px solid rgba(236, 72, 153, 0.3);
             padding: 0.75rem 1.5rem; display: none; align-items: center; justify-content: space-between;
@@ -138,7 +139,7 @@ CHAT_TEMPLATE = """
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Pose ta question par écrit ou via le micro. Je gère la recherche, la mémoire pCloud et la réflexion en direct.</div>
+            <div class="message ai-message">Bonjour ! Pose ta question. Le système modulaire et le juge Python sont actifs.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
@@ -185,7 +186,7 @@ CHAT_TEMPLATE = """
         }
 
         function startSpeechRecognition() {
-            if (!recognition) { alert("Reconnaissance vocale non supportée par ton navigateur."); return; }
+            if (!recognition) { alert("Reconnaissance vocale non supportée."); return; }
             finalTranscript = document.getElementById('user-input').value + ' ';
             document.getElementById('voice-panel').classList.add('active');
             try { recognition.start(); } catch(e) {}
@@ -235,14 +236,13 @@ CHAT_TEMPLATE = """
 
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "⚙️ Traitement en cours...";
+            loadingDiv.textContent = "⚙️ Analyse, validation et recherche en cours...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
-            // Animation des voyants séquentielle pour le retour visuel
-            setIndicator('badge-pcloud', true);  // 1. Lecture pCloud
-            setTimeout(() => { setIndicator('badge-web', true); }, 400);    // 2. Recherche Internet
-            setTimeout(() => { setIndicator('badge-gemini', true); }, 800); // 3. Réflexion Gemini
+            setIndicator('badge-pcloud', true);
+            setTimeout(() => { setIndicator('badge-web', true); }, 400);
+            setTimeout(() => { setIndicator('badge-gemini', true); }, 800);
 
             try {
                 const response = await fetch("/ask", {
@@ -271,7 +271,6 @@ CHAT_TEMPLATE = """
                 errorDiv.textContent = "Erreur de communication avec le serveur.";
                 chatMessages.appendChild(errorDiv);
             } finally {
-                // Extinction des voyants à la fin
                 setIndicator('badge-pcloud', false);
                 setIndicator('badge-web', false);
                 setIndicator('badge-gemini', false);
@@ -293,7 +292,7 @@ def home():
     return render_template_string(CHAT_TEMPLATE), 200, {'Content-Type': 'text/html; charset=utf-8'}
 
 
-def agentic_rag_retrieve(question, max_files_to_scan=30):
+def agentic_rag_retrieve(question, max_files_to_scan=15):
     if not PCLOUD_TOKEN:
         return ""
     try:
@@ -304,19 +303,19 @@ def agentic_rag_retrieve(question, max_files_to_scan=30):
             return ""
 
         json_files = [f for f in data["metadata"]["contents"] if f.get("name", "").endswith(".json")]
-        json_files.sort(key=lambda x: x.get("created", ""), reverse=True)
+        
+        # Utilisation de la fonction de purge du module juge.py
+        json_files = juge.purger_memoires_obsoletes(json_files, max_conserver=max_files_to_scan)
         
         keywords = [w.lower() for w in re.findall(r'\b\w+\b', question) if len(w) > 3]
         relevant_memories = []
         scanned = 0
 
         for file_info in json_files:
-            if scanned >= max_files_to_scan:
-                break
+            scanned += 1
             file_id = file_info.get("fileid")
             if not file_id:
                 continue
-            scanned += 1
             dl_url = f"https://{PCLOUD_HOST}/getfilelink"
             dl_res = requests.get(dl_url, params={"access_token": PCLOUD_TOKEN, "fileid": file_id}, timeout=8).json()
             if dl_res.get("result") == 0 and "hosts" in dl_res and "path" in dl_res:
@@ -329,7 +328,7 @@ def agentic_rag_retrieve(question, max_files_to_scan=30):
                     a = entry.get("answer", "")
                     content_str = f"{q} {a}".lower()
                     score = sum(1 for kw in keywords if kw in content_str)
-                    if not keywords or score > 0 or scanned <= 3:
+                    if not keywords or score > 0 or scanned <= 2:
                         relevant_memories.append({
                             "text": f"Question: {q}\nRéponse: {a}",
                             "score": score
@@ -338,7 +337,7 @@ def agentic_rag_retrieve(question, max_files_to_scan=30):
                     continue
 
         relevant_memories.sort(key=lambda x: x["score"], reverse=True)
-        top_memories = relevant_memories[:5]
+        top_memories = relevant_memories[:3]
         if not top_memories:
             return ""
         return "\n---\n".join([m["text"] for m in top_memories])
@@ -370,9 +369,9 @@ def search_web_tavily(query):
 def generer_requete_web_intelligente(client, question):
     try:
         prompt_query = (
-            f"Contexte actuel : Octobre 2026.\n"
+            f"Contexte actuel : Dimanche 18 octobre 2026.\n"
             f"Question de l'utilisateur : '{question}'\n\n"
-            f"Formule une requête de recherche Web courte, précise et optimisée pour trouver cette information. Réponds uniquement par la requête."
+            f"Formule une requête de recherche Web courte, précise et optimisée pour trouver cette information en direct. Réponds uniquement par la requête."
         )
         res = client.models.generate_content(model=GEMINI_MODEL, contents=prompt_query)
         if res.text:
@@ -388,13 +387,13 @@ def ask_gemini(question):
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # 1. Formulation de la requête par Gemini
+    # 1. Formulation de la requête web
     requete_web_opti = generer_requete_web_intelligente(client, question)
 
-    # 2. Recherche Internet via Tavily
+    # 2. Recherche Internet en direct (Priorité absolue)
     web_results = search_web_tavily(requete_web_opti)
 
-    # 3. Lecture mémoire pCloud
+    # 3. Lecture mémoire pCloud (Secondaire, filtrée via juge.py)
     rag_context = agentic_rag_retrieve(question)
 
     # 4. Calcul mathématique optionnel
@@ -413,16 +412,19 @@ def ask_gemini(question):
         except Exception as e:
             app.logger.warning(f"Erreur calcul: {e}")
 
-    # 5. Master Prompt et Synthèse finale par Gemini
+    # 5. Master Prompt avec ordre strict
     full_system_prompt = SYSTEM_PROMPT_FOOTBALL
-    if rag_context:
-        full_system_prompt += f"\n\n=== ARCHIVES DE LA MÉMOIRE (pCloud) ===\n{rag_context}\n=========================================="
+    
     if web_results and "Aucune donnée" not in web_results:
-        full_system_prompt += f"\n\n=== RÉSULTATS INTERNET EN DIRECT (Requête : '{requete_web_opti}') ===\n{web_results}\n====================================================================="
+        full_system_prompt += f"\n\n=== 1. DONNÉES INTERNET EN DIRECT (PRIORITÉ ABSOLUE - Requête : '{requete_web_opti}') ===\n{web_results}\n======================================================================================="
+
+    if rag_context:
+        full_system_prompt += f"\n\n=== 2. ARCHIVES DE LA MÉMOIRE pCloud (CONTEXTE SECONDAIRE) ===\n{rag_context}\n==========================================================="
+
     if calcul_context:
         full_system_prompt += calcul_context
 
-    full_system_prompt += "\n\n[INSTRUCTION FINALE] Synthétise ces informations, réponds précisément à la question posée, et cite toutes tes sources (pCloud et liens Web) à la fin."
+    full_system_prompt += "\n\n[INSTRUCTION FINALE] En te basant prioritairement sur les données Internet en direct, réponds précisément à la question en respectant l'ordre chronologique actuel (nous sommes le 18 octobre 2026), et cite tes sources."
 
     config = types.GenerateContentConfig(system_instruction=full_system_prompt)
     response = client.models.generate_content(model=GEMINI_MODEL, contents=question, config=config)
@@ -430,7 +432,9 @@ def ask_gemini(question):
     if not response.text:
         raise RuntimeError("Gemini n'a renvoyé aucune réponse.")
 
-    return response.text + graphique_html
+    # Validation finale via le module juge.py
+    reponse_finale = juge.verifier_et_filtrer_reponse(response.text)
+    return reponse_finale + graphique_html
 
 
 def save_to_pcloud(question, answer):
