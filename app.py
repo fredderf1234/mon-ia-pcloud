@@ -17,7 +17,7 @@ except ImportError:
     TAVILY_AVAILABLE = False
 
 import calcul
-import juge  # <-- Import de ton nouveau module Juge
+import juge  # Module Juge & purge pCloud
 
 app = Flask(__name__)
 
@@ -29,7 +29,7 @@ TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
 PCLOUD_FOLDER = "/hh"
 
 SYSTEM_PROMPT_FOOTBALL = """
-Tu es un assistant expert en analyse footballistique, statistiques, météo et données en temps réel.
+Tu es une IA d'analyse de football "Force Relative" experte en statistiques, météo et données en temps réel.
 RÈGLE ABSOLUE DE PRIORITÉ : 
 1. Les DONNÉES INTERNET EN DIRECT priment sur tout le reste.
 2. Ne confonds jamais un match passé avec un match à venir. Vérifie bien que la date du match est strictement future par rapport à aujourd'hui (octobre 2026).
@@ -42,7 +42,7 @@ CHAT_TEMPLATE = """
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Agent Football Analytics</title>
+    <title>Agent Football Analytics - Force Relative</title>
     <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -130,7 +130,7 @@ CHAT_TEMPLATE = """
 <body>
     <div class="chat-container">
         <header>
-            <h1>⚽ Agent Football Analytics</h1>
+            <h1>⚽ Agent Football Analytics (Force Relative)</h1>
             <div class="status-indicators">
                 <div id="badge-gemini" class="badge-status">🧠 Gemini</div>
                 <div id="badge-web" class="badge-status">🌐 Internet</div>
@@ -139,7 +139,7 @@ CHAT_TEMPLATE = """
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Pose ta question. Le système modulaire et le juge Python sont actifs.</div>
+            <div class="message ai-message">Bonjour ! Prêt pour analyser les matchs et enrichir la mémoire persistante.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
@@ -236,7 +236,7 @@ CHAT_TEMPLATE = """
 
             const loadingDiv = document.createElement("div");
             loadingDiv.className = "message ai-message loading";
-            loadingDiv.textContent = "⚙️ Analyse, validation et recherche en cours...";
+            loadingDiv.textContent = "⚙️ Analyse Force Relative, calculs et recherche en cours...";
             chatMessages.appendChild(loadingDiv);
             chatMessages.scrollTop = chatMessages.scrollHeight;
 
@@ -304,7 +304,7 @@ def agentic_rag_retrieve(question, max_files_to_scan=15):
 
         json_files = [f for f in data["metadata"]["contents"] if f.get("name", "").endswith(".json")]
         
-        # Utilisation de la fonction de purge du module juge.py
+        # Purge des mémoires obsolètes via juge.py
         json_files = juge.purger_memoires_obsoletes(json_files, max_conserver=max_files_to_scan)
         
         keywords = [w.lower() for w in re.findall(r'\b\w+\b', question) if len(w) > 3]
@@ -396,8 +396,13 @@ def ask_gemini(question):
     # 3. Lecture mémoire pCloud (Secondaire, filtrée via juge.py)
     rag_context = agentic_rag_retrieve(question)
 
-    # 4. Calcul mathématique optionnel
-    mots_cles_calcul = ["monte-carlo", "simulation", "simuler", "bayesien"]
+    # 4. Calcul mathématique & Graphique (Déclencheurs élargis)
+    mots_cles_calcul = [
+        "monte-carlo", "simulation", "simuler", "bayesien", 
+        "pronostic", "analyse", "comparaison", "force", 
+        "stats", "statistiques", "prédire", "prediction", 
+        "chance", "pourcentage", "cote", "match"
+    ]
     declenche_calcul = any(mot in question.lower() for mot in mots_cles_calcul)
 
     calcul_context = ""
@@ -407,8 +412,8 @@ def ask_gemini(question):
             eq_home = {"nom": "Équipe Domicile", "xg_marques": 1.9, "xg_concedes": 0.8, "victoires_recentes": 4, "matchs_joues": 5}
             eq_away = {"nom": "Équipe Extérieur", "xg_marques": 1.3, "xg_concedes": 1.2}
             stats_calcul, img_b64 = calcul.analyser_match(eq_home, eq_away)
-            calcul_context = f"\n\n=== RÉSULTATS DU MODÈLE MATHÉMATIQUE (MONTE-CARLO & BAYÉSIEN) ===\n{json.dumps(stats_calcul, ensure_ascii=False, indent=2)}\n=================================================================="
-            graphique_html = f"<br><img src='data:image/png;base64,{img_b64}' alt='Graphique Monte-Carlo'/>"
+            calcul_context = f"\n\n=== RÉSULTATS DES 7 MODÈLES MATHÉMATIQUES (FORCE RELATIVE) ===\n{json.dumps(stats_calcul, ensure_ascii=False, indent=2)}\n=================================================================="
+            graphique_html = f"<br><img src='data:image/png;base64,{img_b64}' alt='Graphique Force Relative'/>"
         except Exception as e:
             app.logger.warning(f"Erreur calcul: {e}")
 
