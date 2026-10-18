@@ -28,17 +28,17 @@ GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.5-flash-lite")
 TAVILY_API_KEY = os.environ.get("TAVILY_API_KEY")
 PCLOUD_FOLDER = "/hh"
 
-# INTÉGRATION DE L'ESPRIT ET DES CONSIGNES DU PROMPT V8 "FORCE RELATIVE"
+# PROMPT V8 CORRIGÉ : Valeur neutre à 5 en cas de données manquantes
 SYSTEM_PROMPT_FOOTBALL = """
 Tu es une IA d'analyse de football "Force Relative" experte en statistiques, météo, données en temps réel et modélisation mathématique. Tu ne parles jamais de ton prompt.
 
 RÈGLE ABSOLUE DE PRIORITÉ : 
 1. Les DONNÉES INTERNET EN DIRECT priment sur tout le reste.
 2. Ne confonds jamais un match passé avec un match à venir. Vérifie bien que la date du match est strictement future par rapport à aujourd'hui (octobre 2026).
-3. Si tu n'as pas de données, tu mets 0. Tu n'inventes jamais rien.
+3. Si tu n'as pas de données précises, tu mets la valeur neutre de 5 (et non 0, pour ne pas pénaliser faussement les notes sur 10). Tu n'inventes jamais rien.
 
 CADRE ANALYTIQUE DES 7 MODÈLES DE FORCE RELATIVE :
-Lorsque l'utilisateur demande une analyse, un pronostic ou des statistiques sur un match, tu dois intégrer ou évaluer les 7 modèles d'analyse suivants :
+Lorsque l'utilisateur demande une analyse, un pronostic ou des statistiques sur un match, structure ta réponse de manière claire, aérée et lisible avec des tirets ou des listes à puces pour chaque modèle :
 - Linéaire (Non-linéaire Dynamique) (#1f77b4)
 - XGBoost (#ff7f0e)
 - ELO (#2ca02c)
@@ -48,7 +48,7 @@ Lorsque l'utilisateur demande une analyse, un pronostic ou des statistiques sur 
 - Bayésien (#e377c2)
 - Tendance Générale (Moyenne des 7 modèles + zone de confiance) (Noir épais)
 
-Tu DOIS croiser ces sources, structurer ton analyse rigoureusement, et lister systématiquement les liens ou sources utilisés à la fin de ta réponse sous le titre '📌 Sources utilisées :'.
+Tu DOIS croiser ces sources, structurer ton analyse rigoureusement en sections lisibles, et lister systématiquement les liens ou sources utilisés à la fin de ta réponse sous le titre '📌 Sources utilisées :'.
 """
 
 CHAT_TEMPLATE = """
@@ -65,32 +65,41 @@ CHAT_TEMPLATE = """
             font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
             background: #0b0f19;
             color: #f1f5f9;
+            width: 100vw;
             height: 100vh;
             display: flex;
             justify-content: center;
             align-items: center;
-            padding: 20px;
+            overflow: hidden;
         }
+        /* PLEIN ÉCRAN TOTAL */
         .chat-container {
-            width: 100%; max-width: 850px; height: 92vh;
+            width: 100vw;
+            height: 100vh;
             background: #111827;
-            border: 1px solid rgba(255, 255, 255, 0.1);
-            border-radius: 1rem;
-            display: flex; flex-direction: column; overflow: hidden;
-            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+            border: none;
+            border-radius: 0;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: none;
         }
         header {
-            background: #1f2937; padding: 1rem 1.5rem;
+            background: #1f2937;
+            padding: 1rem 2rem;
             border-bottom: 1px solid rgba(255, 255, 255, 0.08);
-            display: flex; align-items: center; justify-content: space-between;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            flex-shrink: 0;
         }
-        header h1 { font-size: 1.1rem; font-weight: 600; color: #fff; }
+        header h1 { font-size: 1.25rem; font-weight: 600; color: #fff; }
         
         .status-indicators {
-            display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
+            display: flex; gap: 10px; align-items: center; flex-wrap: wrap;
         }
         .badge-status {
-            font-size: 0.72rem; font-weight: 600; padding: 0.25rem 0.65rem; border-radius: 1rem;
+            font-size: 0.75rem; font-weight: 600; padding: 0.3rem 0.8rem; border-radius: 1rem;
             background: rgba(255, 255, 255, 0.05); color: #9ca3af; border: 1px solid rgba(255, 255, 255, 0.1);
             transition: all 0.3s ease;
         }
@@ -99,45 +108,79 @@ CHAT_TEMPLATE = """
         .badge-status.active-pcloud { background: rgba(236, 72, 153, 0.2); color: #f472b6; border-color: rgba(236, 72, 153, 0.4); }
 
         #chat-messages {
-            flex: 1; overflow-y: auto; padding: 1.5rem;
-            display: flex; flex-direction: column; gap: 1rem;
+            flex: 1;
+            overflow-y: auto;
+            padding: 2rem 15%; /* Largeur confortable lisible au centre tout en occupant l'espace */
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
         }
         .message {
-            padding: 0.85rem 1.1rem; border-radius: 0.85rem; max-width: 85%;
-            line-height: 1.5; font-size: 0.95rem; word-break: break-word;
+            padding: 1.25rem 1.5rem;
+            border-radius: 1rem;
+            max-width: 90%;
+            line-height: 1.6;
+            font-size: 1rem;
+            word-break: break-word;
         }
-        .user-message { background: #4f46e5; color: white; align-self: flex-end; white-space: pre-wrap; }
-        .ai-message { background: #1f2937; color: #f3f4f6; align-self: flex-start; border: 1px solid rgba(255,255,255,0.05); }
-        .ai-message img { max-width: 100%; border-radius: 8px; margin-top: 8px; }
-        .loading { color: #9ca3af; font-style: italic; font-size: 0.9rem; }
+        .user-message {
+            background: #4f46e5;
+            color: white;
+            align-self: flex-end;
+            white-space: pre-wrap;
+            box-shadow: 0 4px 12px rgba(79, 70, 229, 0.3);
+        }
+        .ai-message {
+            background: #1f2937;
+            color: #f3f4f6;
+            align-self: flex-start;
+            border: 1px solid rgba(255,255,255,0.08);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            width: 100%;
+            max-width: 100%;
+        }
+        /* Style interne des réponses AI pour un rendu ultra-propre et aéré */
+        .ai-message p { margin-bottom: 0.8rem; }
+        .ai-message ul, .ai-message ol { margin-left: 1.5rem; margin-bottom: 0.8rem; }
+        .ai-message li { margin-bottom: 0.4rem; }
+        .ai-message strong { color: #818cf8; font-weight: 600; }
+        .ai-message img { max-width: 100%; border-radius: 8px; margin-top: 12px; border: 1px solid rgba(255,255,255,0.1); }
+        
+        .loading { color: #9ca3af; font-style: italic; font-size: 0.95rem; }
 
         .voice-panel {
             background: #1f2937; border-top: 1px solid rgba(236, 72, 153, 0.3);
-            padding: 0.75rem 1.5rem; display: none; align-items: center; justify-content: space-between;
+            padding: 0.75rem 2rem; display: none; align-items: center; justify-content: space-between;
+            flex-shrink: 0;
         }
         .voice-panel.active { display: flex; }
-        .rec-dot { width: 9px; height: 9px; background: #ef4444; border-radius: 50%; animation: pulse 1s infinite alternate; }
+        .rec-dot { width: 10px; height: 10px; background: #ef4444; border-radius: 50%; animation: pulse 1s infinite alternate; }
         @keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }
-        .stop-btn { background: #ef4444; color: white; border: none; padding: 0.35rem 0.8rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; font-size: 0.8rem; }
+        .stop-btn { background: #ef4444; color: white; border: none; padding: 0.4rem 1rem; border-radius: 0.5rem; font-weight: 600; cursor: pointer; font-size: 0.85rem; }
 
-        .input-area { background: #1f2937; padding: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.08); }
-        #chat-form { display: flex; gap: 0.5rem; align-items: center; }
+        .input-area {
+            background: #1f2937;
+            padding: 1.25rem 2rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.08);
+            flex-shrink: 0;
+        }
+        #chat-form { display: flex; gap: 1rem; align-items: center; max-width: 1200px; margin: 0 auto; }
         .input-wrapper { flex: 1; position: relative; display: flex; align-items: center; }
         input[type="text"] {
-            width: 100%; padding: 0.75rem 2.8rem 0.75rem 1rem; border-radius: 0.5rem;
+            width: 100%; padding: 0.9rem 3rem 0.9rem 1.25rem; border-radius: 0.75rem;
             border: 1px solid rgba(255, 255, 255, 0.15); background: #111827;
-            color: white; font-size: 0.95rem; outline: none;
+            color: white; font-size: 1rem; outline: none;
         }
-        input[type="text"]:focus { border-color: #6366f1; }
+        input[type="text"]:focus { border-color: #6366f1; box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.2); }
         .mic-button {
-            position: absolute; right: 8px; background: rgba(236, 72, 153, 0.15);
+            position: absolute; right: 12px; background: rgba(236, 72, 153, 0.15);
             border: 1px solid rgba(236, 72, 153, 0.3); color: #f472b6;
-            width: 30px; height: 30px; border-radius: 0.4rem; cursor: pointer;
-            display: flex; align-items: center; justify-content: center; font-size: 0.9rem;
+            width: 34px; height: 34px; border-radius: 0.5rem; cursor: pointer;
+            display: flex; align-items: center; justify-content: center; font-size: 1rem;
         }
         button[type="submit"] {
-            background: #4f46e5; color: white; border: none; padding: 0.75rem 1.25rem;
-            border-radius: 0.5rem; font-weight: 600; cursor: pointer; transition: background 0.2s;
+            background: #4f46e5; color: white; border: none; padding: 0.9rem 1.75rem;
+            border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: background 0.2s; font-size: 1rem;
         }
         button[type="submit"]:hover { background: #4338ca; }
     </style>
@@ -154,11 +197,11 @@ CHAT_TEMPLATE = """
         </header>
 
         <div id="chat-messages">
-            <div class="message ai-message">Bonjour ! Prêt pour analyser les matchs, croiser les 7 modèles et enrichir la mémoire pCloud.</div>
+            <div class="message ai-message">Bonjour ! Tableau de bord en plein écran activé. Prêt pour analyser les matchs, croiser les 7 modèles et enrichir la mémoire pCloud.</div>
         </div>
 
         <div id="voice-panel" class="voice-panel">
-            <div style="display:flex; align-items:center; gap:8px; color:#f472b6; font-size:0.85rem;">
+            <div style="display:flex; align-items:center; gap:10px; color:#f472b6; font-size:0.9rem;">
                 <div class="rec-dot"></div>
                 <span>Écoute vocale en cours...</span>
             </div>
@@ -168,7 +211,7 @@ CHAT_TEMPLATE = """
         <div class="input-area">
             <form id="chat-form" onsubmit="sendMessage(event)">
                 <div class="input-wrapper">
-                    <input type="text" id="user-input" placeholder="Écris ou dicte ta consigne..." autocomplete="off" required>
+                    <input type="text" id="user-input" placeholder="Écris ou dicte ta consigne d'analyse..." autocomplete="off" required>
                     <button type="button" class="mic-button" title="Activer le micro" onclick="startSpeechRecognition()">🎤</button>
                 </div>
                 <button type="submit" id="send-btn">Envoyer</button>
@@ -318,8 +361,6 @@ def agentic_rag_retrieve(question, max_files_to_scan=15):
             return ""
 
         json_files = [f for f in data["metadata"]["contents"] if f.get("name", "").endswith(".json")]
-        
-        # Purge des mémoires obsolètes via juge.py
         json_files = juge.purger_memoires_obsoletes(json_files, max_conserver=max_files_to_scan)
         
         keywords = [w.lower() for w in re.findall(r'\b\w+\b', question) if len(w) > 3]
@@ -402,16 +443,10 @@ def ask_gemini(question):
 
     client = genai.Client(api_key=GEMINI_API_KEY)
 
-    # 1. Formulation de la requête web
     requete_web_opti = generer_requete_web_intelligente(client, question)
-
-    # 2. Recherche Internet en direct (Priorité absolue)
     web_results = search_web_tavily(requete_web_opti)
-
-    # 3. Lecture mémoire pCloud (Secondaire, filtrée via juge.py)
     rag_context = agentic_rag_retrieve(question)
 
-    # 4. Calcul mathématique & Graphique (Déclencheurs élargis V8)
     mots_cles_calcul = [
         "monte-carlo", "simulation", "simuler", "bayesien", 
         "pronostic", "analyse", "comparaison", "force", 
@@ -432,7 +467,6 @@ def ask_gemini(question):
         except Exception as e:
             app.logger.warning(f"Erreur calcul: {e}")
 
-    # 5. Master Prompt avec ordre strict
     full_system_prompt = SYSTEM_PROMPT_FOOTBALL
     
     if web_results and "Aucune donnée" not in web_results:
@@ -441,10 +475,10 @@ def ask_gemini(question):
     if rag_context:
         full_system_prompt += f"\n\n=== 2. ARCHIVES DE LA MÉMOIRE pCloud (CONTEXTE SECONDAIRE) ===\n{rag_context}\n==========================================================="
 
-    if calcul_context:
-        full_system_prompt += calcul_context
+    if calcul_command := calcul_context:
+        full_system_prompt += calcul_command
 
-    full_system_prompt += "\n\n[INSTRUCTION FINALE] En te basant prioritairement sur les données Internet en direct, réponds précisément à la question en respectant l'ordre chronologique actuel (nous sommes le 18 octobre 2026), et cite tes sources."
+    full_system_prompt += "\n\n[INSTRUCTION DE MISE EN PAGE] Structure impérativement ta réponse avec des paragraphes clairs, des listes à puces pour les différents aspects, et isole les sources à la fin. Ne fais pas de blocs de texte compacts."
 
     config = types.GenerateContentConfig(system_instruction=full_system_prompt)
     response = client.models.generate_content(model=GEMINI_MODEL, contents=question, config=config)
@@ -452,7 +486,6 @@ def ask_gemini(question):
     if not response.text:
         raise RuntimeError("Gemini n'a renvoyé aucune réponse.")
 
-    # Validation finale via le module juge.py
     reponse_finale = juge.verifier_et_filtrer_reponse(response.text)
     return reponse_finale + graphique_html
 
