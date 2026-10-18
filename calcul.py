@@ -13,7 +13,7 @@ def analyser_match(eq_home, eq_away):
     # Axe du temps : 0 à 120 minutes (match + prolongations + tirs au but)
     minutes = np.linspace(0, 120, 121)
 
-    np.random.seed(42)  # Stabilité pour les rendus
+    np.random.seed(42)  # Stabilité pour les rendus graphiques
     
     # 1. Linéaire (Non-linéaire Dynamique) = BLEU #1f77b4
     c_lineaire = 20 + 15 * np.sin(minutes / 15) + np.random.normal(0, 2, len(minutes))
@@ -43,7 +43,7 @@ def analyser_match(eq_home, eq_away):
     confiance_sup = tendance_generale + 6
     confiance_inf = tendance_generale - 6
 
-    # Création du graphique Matplotlib optimisé pour le style sombre du dashboard
+    # Création du graphique Matplotlib adapté au design sombre du dashboard
     fig, ax = plt.subplots(figsize=(10, 5), facecolor='#111827')
     ax.set_facecolor('#1f2937')
 
@@ -77,7 +77,7 @@ def analyser_match(eq_home, eq_away):
 
     plt.tight_layout()
 
-    # Conversion en Base64 pour injection HTML
+    # Conversion en Base64 pour injection HTML dans l'interface
     buffer = io.BytesIO()
     plt.savefig(buffer, format='png', dpi=150, bbox_inches='tight', facecolor=fig.get_facecolor(), edgecolor='none')
     buffer.seek(0)
